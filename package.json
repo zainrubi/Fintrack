@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint app/ lib/ types/ scripts/",
+    "verify": "npx tsx scripts/verify-calculations.ts"
   },
   "dependencies": {
     "next": "16.4.1",
