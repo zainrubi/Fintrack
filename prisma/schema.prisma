@@ -1,0 +1,425 @@
+// ==============================================================================
+// Fintrack — Prisma Database Schema
+//
+// Designed for PostgreSQL with strict monetary precision (Decimal 14, 2),
+// multi-tenant user isolation, referential integrity, and efficient reporting indexes.
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==============================================================================
+// 1. Enums
+// ==============================================================================
+
+enum SalaryType {
+  PRIMARY
+  SECONDARY
+  BONUS
+  ALLOWANCE
+  FREELANCE
+  OVERTIME
+  OTHER
+}
+
+enum ExpenseType {
+  FIXED
+  VARIABLE
+}
+
+enum CategoryType {
+  EXPENSE
+  SAVINGS
+  INVESTMENT
+  INSURANCE
+}
+
+enum SavingsCategory {
+  EMERGENCY_FUND
+  RETIREMENT
+  HOUSE_DOWNPAYMENT
+  EDUCATION
+  WEDDING
+  TRAVEL_VACATION
+  HAJJ_UMRAH
+  GENERAL_SAVINGS
+  OTHER
+}
+
+enum InvestmentType {
+  MUTUAL_FUND
+  STOCKS
+  REAL_ESTATE
+  GOLD_PRECIOUS_METALS
+  GOVERNMENT_BONDS
+  PROVIDENT_FUND
+  CRYPTO
+  BUSINESS_VENTURE
+  OTHER
+}
+
+enum InsuranceCategory {
+  HEALTH
+  LIFE
+  VEHICLE
+  HOME
+  DISABILITY
+  OTHER
+}
+
+enum PaymentFrequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+  ONE_TIME
+}
+
+enum InsuranceFrequency {
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+}
+
+enum LoanFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+// ==============================================================================
+// 2. User & Financial Profile
+// ==============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  image     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  profile           FinancialProfile?
+  categories        Category[]
+  salaries          SalaryRecord[]
+  expenses          Expense[]
+  savingsGoals      SavingsGoal[]
+  savingsRecords    SavingsRecord[]
+  investmentAssets  InvestmentAsset[]
+  investmentRecords InvestmentRecord[]
+  insurancePolicies InsurancePolicy[]
+  insurancePayments InsurancePayment[]
+  loans             Loan[]
+  loanRepayments    LoanRepayment[]
+
+  @@map("users")
+}
+
+model FinancialProfile {
+  id                        String   @id @default(cuid())
+  userId                    String   @unique @map("user_id")
+  defaultCurrency           String   @default("PKR") @map("default_currency") @db.VarChar(3)
+  monthlyIncomeTarget       Decimal? @map("monthly_income_target") @db.Decimal(14, 2)
+  monthlySavingsTarget      Decimal? @map("monthly_savings_target") @db.Decimal(14, 2)
+  emergencyFundTargetMonths Int      @default(6) @map("emergency_fund_target_months")
+  fiscalYearStartMonth      Int      @default(1) @map("fiscal_year_start_month")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("financial_profiles")
+}
+
+// ==============================================================================
+// 3. Category System (Global System Defaults + User Custom Categories)
+// ==============================================================================
+
+model Category {
+  id                 String       @id @default(cuid())
+  userId             String?      @map("user_id") // NULL for global system default categories
+  name               String       @db.VarChar(100)
+  slug               String       @db.VarChar(100)
+  type               CategoryType @default(EXPENSE)
+  defaultExpenseType ExpenseType? @map("default_expense_type")
+  icon               String?      @db.VarChar(50)
+  color              String?      @db.VarChar(20)
+  isSystem           Boolean      @default(false) @map("is_system")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  // Relationships
+  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+
+  @@unique([userId, slug, type])
+  @@index([userId, type])
+  @@map("categories")
+}
+
+// ==============================================================================
+// 4. Income & Salary Management
+// ==============================================================================
+
+model SalaryRecord {
+  id               String     @id @default(cuid())
+  userId           String     @map("user_id")
+  amount           Decimal    @db.Decimal(14, 2)
+  currency         String     @default("PKR") @db.VarChar(3)
+  salaryType       SalaryType @default(PRIMARY) @map("salary_type")
+  payPeriodYear    Int        @map("pay_period_year")
+  payPeriodMonth   Int        @map("pay_period_month") // 1-12
+  paymentDate      DateTime   @map("payment_date")
+  employerOrSource String?    @map("employer_or_source") @db.VarChar(150)
+  notes            String?    @db.Text
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, payPeriodYear, payPeriodMonth])
+  @@index([userId, paymentDate])
+  @@map("salary_records")
+}
+
+// ==============================================================================
+// 5. Expense Tracking (Fixed vs Variable)
+// ==============================================================================
+
+model Expense {
+  id                 String            @id @default(cuid())
+  userId             String            @map("user_id")
+  categoryId         String            @map("category_id")
+  amount             Decimal           @db.Decimal(14, 2)
+  currency           String            @default("PKR") @db.VarChar(3)
+  expenseType        ExpenseType       @map("expense_type")
+  date               DateTime
+  periodYear         Int               @map("period_year")
+  periodMonth        Int               @map("period_month") // 1-12
+  description        String            @db.VarChar(255)
+  isRecurring        Boolean           @default(false) @map("is_recurring")
+  recurringFrequency PaymentFrequency? @map("recurring_frequency")
+  notes              String?           @db.Text
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  // Relationships
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([userId, periodYear, periodMonth])
+  @@index([userId, expenseType])
+  @@index([userId, categoryId])
+  @@index([userId, date])
+  @@map("expenses")
+}
+
+// ==============================================================================
+// 6. Savings Goals & Reserve Contributions
+// ==============================================================================
+
+model SavingsGoal {
+  id              String          @id @default(cuid())
+  userId          String          @map("user_id")
+  name            String          @db.VarChar(120)
+  category        SavingsCategory @default(GENERAL_SAVINGS)
+  targetAmount    Decimal?        @map("target_amount") @db.Decimal(14, 2)
+  targetDate      DateTime?       @map("target_date")
+  isEmergencyFund Boolean         @default(false) @map("is_emergency_fund")
+  notes           String?         @db.Text
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relationships
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records SavingsRecord[]
+
+  @@index([userId])
+  @@map("savings_goals")
+}
+
+model SavingsRecord {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  goalId      String?         @map("goal_id")
+  amount      Decimal         @db.Decimal(14, 2)
+  currency    String          @default("PKR") @db.VarChar(3)
+  category    SavingsCategory @default(GENERAL_SAVINGS)
+  date        DateTime
+  periodYear  Int             @map("period_year")
+  periodMonth Int             @map("period_month")
+  notes       String?         @db.Text
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  // Relationships
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal SavingsGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  @@index([userId, periodYear, periodMonth])
+  @@index([userId, date])
+  @@map("savings_records")
+}
+
+// ==============================================================================
+// 7. Investment Portfolio Assets & Capital Deployed
+// ==============================================================================
+
+model InvestmentAsset {
+  id                    String         @id @default(cuid())
+  userId                String         @map("user_id")
+  assetName             String         @map("asset_name") @db.VarChar(150)
+  investmentType        InvestmentType @map("investment_type")
+  institutionOrPlatform String?        @map("institution_or_platform") @db.VarChar(150)
+  notes                 String?        @db.Text
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  // Relationships
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  records InvestmentRecord[]
+
+  @@index([userId])
+  @@map("investment_assets")
+}
+
+model InvestmentRecord {
+  id             String         @id @default(cuid())
+  userId         String         @map("user_id")
+  assetId        String?        @map("asset_id")
+  amount         Decimal        @db.Decimal(14, 2)
+  currency       String         @default("PKR") @db.VarChar(3)
+  investmentType InvestmentType @map("investment_type")
+  date           DateTime
+  periodYear     Int            @map("period_year")
+  periodMonth    Int            @map("period_month")
+  notes          String?        @db.Text
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  // Relationships
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset InvestmentAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([userId, periodYear, periodMonth])
+  @@index([userId, date])
+  @@map("investment_records")
+}
+
+// ==============================================================================
+// 8. Insurance Policies & Premium Payments
+// ==============================================================================
+
+model InsurancePolicy {
+  id            String             @id @default(cuid())
+  userId        String             @map("user_id")
+  policyName    String             @map("policy_name") @db.VarChar(150)
+  policyNumber  String?            @map("policy_number") @db.VarChar(100)
+  provider      String?            @db.VarChar(150)
+  category      InsuranceCategory
+  premiumAmount Decimal            @map("premium_amount") @db.Decimal(14, 2)
+  currency      String             @default("PKR") @db.VarChar(3)
+  frequency     InsuranceFrequency @default(ANNUALLY)
+  startDate     DateTime           @map("start_date")
+  renewalDate   DateTime?          @map("renewal_date")
+  isActive      Boolean            @default(true) @map("is_active")
+  notes         String?            @db.Text
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  // Relationships
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments InsurancePayment[]
+
+  @@index([userId])
+  @@map("insurance_policies")
+}
+
+model InsurancePayment {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  policyId    String   @map("policy_id")
+  amount      Decimal  @db.Decimal(14, 2)
+  currency    String   @default("PKR") @db.VarChar(3)
+  paymentDate DateTime @map("payment_date")
+  periodYear  Int      @map("period_year")
+  periodMonth Int      @map("period_month")
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policy InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, periodYear, periodMonth])
+  @@index([userId, paymentDate])
+  @@map("insurance_payments")
+}
+
+// ==============================================================================
+// 9. Loans, Liabilities & EMI Repayments
+// ==============================================================================
+
+model Loan {
+  id                String        @id @default(cuid())
+  userId            String        @map("user_id")
+  loanTitle         String        @map("loan_title") @db.VarChar(150)
+  lenderName        String        @map("lender_name") @db.VarChar(150)
+  principalAmount   Decimal       @map("principal_amount") @db.Decimal(14, 2)
+  outstandingAmount Decimal       @map("outstanding_amount") @db.Decimal(14, 2)
+  interestRate      Decimal       @map("interest_rate") @db.Decimal(5, 2) // Annual percentage e.g. 14.50%
+  installmentAmount Decimal       @map("installment_amount") @db.Decimal(14, 2) // Monthly EMI
+  frequency         LoanFrequency @default(MONTHLY)
+  startDate         DateTime      @map("start_date")
+  endDate           DateTime?     @map("end_date")
+  isClosed          Boolean       @default(false) @map("is_closed")
+  notes             String?       @db.Text
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  // Relationships
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repayments LoanRepayment[]
+
+  @@index([userId])
+  @@map("loans")
+}
+
+model LoanRepayment {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  loanId             String   @map("loan_id")
+  amount             Decimal  @db.Decimal(14, 2)
+  principalComponent Decimal? @map("principal_component") @db.Decimal(14, 2)
+  interestComponent  Decimal? @map("interest_component") @db.Decimal(14, 2)
+  paymentDate        DateTime @map("payment_date")
+  periodYear         Int      @map("period_year")
+  periodMonth        Int      @map("period_month")
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@index([userId, periodYear, periodMonth])
+  @@index([userId, paymentDate])
+  @@map("loan_repayments")
+}

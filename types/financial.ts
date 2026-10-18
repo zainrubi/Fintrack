@@ -184,16 +184,49 @@ export interface ExpenseRecord {
 }
 
 /**
+ * Dedicated savings goal or reserve fund target.
+ */
+export interface SavingsGoal {
+  id: string;
+  userId: string;
+  name: string;
+  category: SavingsCategory;
+  targetAmount?: number;
+  targetDate?: Date | string;
+  isEmergencyFund: boolean;
+  notes?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
  * Savings record representing money moved into cash reserves or dedicated emergency funds.
  */
 export interface SavingsRecord {
   id: string;
   userId: string;
+  goalId?: string;
   amount: number;
   currency: CurrencyCode;
   category: SavingsCategory;
   date: Date | string;
+  periodYear?: number;
+  periodMonth?: number;
   targetGoalName?: string;
+  notes?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
+ * Investment asset representing a held portfolio asset or account.
+ */
+export interface InvestmentAsset {
+  id: string;
+  userId: string;
+  assetName: string;
+  investmentType: InvestmentType;
+  institutionOrPlatform?: string;
   notes?: string;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -206,12 +239,55 @@ export interface SavingsRecord {
 export interface InvestmentRecord {
   id: string;
   userId: string;
+  assetId?: string;
   amount: number;
   currency: CurrencyCode;
   investmentType: InvestmentType;
-  assetName: string;
+  assetName?: string;
   institutionOrPlatform?: string;
   date: Date | string;
+  periodYear?: number;
+  periodMonth?: number;
+  notes?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
+ * Insurance policy representing coverage, terms, and ongoing premium commitments.
+ */
+export interface InsurancePolicy {
+  id: string;
+  userId: string;
+  policyName: string;
+  policyNumber?: string;
+  provider?: string;
+  category: InsuranceCategory;
+  premiumAmount: number;
+  currency: CurrencyCode;
+  frequency: InsuranceFrequency;
+  startDate: Date | string;
+  renewalDate?: Date | string;
+  isActive: boolean;
+  notes?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
+ * Insurance payment record representing a specific premium payment transaction for a policy.
+ */
+export interface InsurancePayment {
+  id: string;
+  userId: string;
+  policyId: string;
+  amount: number;
+  currency: CurrencyCode;
+  paymentDate: Date | string;
+  periodYear: number;
+  periodMonth: number;
+  policyName?: string;
+  category?: InsuranceCategory;
   notes?: string;
   createdAt: Date | string;
   updatedAt: Date | string;
