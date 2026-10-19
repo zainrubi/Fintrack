@@ -59,6 +59,8 @@ export interface ListInsurancePolicyFilter {
   category?: DomainInsuranceCategory;
   frequency?: DomainInsuranceFrequency;
   isActive?: boolean;
+  startDate?: Date | string;
+  endDate?: Date | string;
 }
 
 export interface CreateInsurancePaymentInput {
@@ -84,6 +86,7 @@ export interface UpdateInsurancePaymentInput {
 export interface ListInsurancePaymentFilter {
   policyId?: string;
   category?: DomainInsuranceCategory;
+  paymentDate?: Date | string;
   periodYear?: number;
   periodMonth?: number;
   startDate?: Date | string;
@@ -101,6 +104,49 @@ function parseAndValidateDate(value: Date | string, fieldName: string): Date {
   }
   return parsed;
 }
+
+/**
+ * Validates monetary amount to ensure:
+ * - Finite number (not NaN or Infinity)
+ * - Greater than zero
+ * - Within safe currency bounds (<= 90 trillion)
+ * - Has at most 2 decimal places (sub-cent precision is rejected)
+ */
+export function validateMonetaryAmount(amount: unknown, fieldName: string): Prisma.Decimal {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+    throw new ValidationError(`${fieldName} must be a finite numeric value.`, fieldName, amount);
+  }
+  if (amount <= 0) {
+    throw new ValidationError(`${fieldName} must be greater than zero.`, fieldName, amount);
+  }
+  if (Math.abs(amount) > 90_000_000_000_000) {
+    throw new ValidationError(`${fieldName} exceeds safe currency bounds.`, fieldName, amount);
+  }
+  const decimalStr = amount.toString();
+  if (decimalStr.includes('.')) {
+    const fraction = decimalStr.split('.')[1];
+    if (fraction && fraction.length > 2 && Math.abs(Math.round(amount * 100) - amount * 100) > 1e-6) {
+      throw new ValidationError(`${fieldName} cannot have more than 2 decimal places.`, fieldName, amount);
+    }
+  }
+  return safeNumberToDecimal(amount, fieldName);
+}
+
+const VALID_INSURANCE_CATEGORIES: DomainInsuranceCategory[] = [
+  'health',
+  'life',
+  'vehicle',
+  'home',
+  'disability',
+  'other',
+];
+
+const VALID_INSURANCE_FREQUENCIES: DomainInsuranceFrequency[] = [
+  'monthly',
+  'quarterly',
+  'semi-annually',
+  'annually',
+];
 
 /**
  * Validates and sanitizes input for creating an InsurancePolicy.
@@ -125,23 +171,25 @@ export function validateInsurancePolicyInput(input: CreateInsurancePolicyInput):
   const policyName = input.policyName.trim().slice(0, 150);
 
   // 2. Policy Number & Provider
-  const policyNumber = input.policyNumber ? input.policyNumber.trim().slice(0, 100) : null;
-  const provider = input.provider ? input.provider.trim().slice(0, 150) : null;
+  const policyNumber = input.policyNumber && input.policyNumber.trim() !== ''
+    ? input.policyNumber.trim().slice(0, 100)
+    : null;
+  const provider = input.provider && input.provider.trim() !== ''
+    ? input.provider.trim().slice(0, 150)
+    : null;
 
   // 3. Category
-  if (!input.category) {
-    throw new ValidationError('Insurance category is required.', 'category', input.category);
+  if (!input.category || !VALID_INSURANCE_CATEGORIES.includes(input.category)) {
+    throw new ValidationError(
+      `Invalid insurance category '${input.category}'. Permitted categories: ${VALID_INSURANCE_CATEGORIES.join(', ')}`,
+      'category',
+      input.category
+    );
   }
   const category = input.category;
 
   // 4. Premium Amount
-  if (typeof input.premiumAmount !== 'number' || !Number.isFinite(input.premiumAmount)) {
-    throw new ValidationError('premiumAmount must be a finite numeric value.', 'premiumAmount', input.premiumAmount);
-  }
-  if (input.premiumAmount <= 0) {
-    throw new ValidationError('premiumAmount must be greater than zero.', 'premiumAmount', input.premiumAmount);
-  }
-  const premiumAmountDecimal = safeNumberToDecimal(input.premiumAmount, 'premiumAmount');
+  const premiumAmountDecimal = validateMonetaryAmount(input.premiumAmount, 'premiumAmount');
 
   // 5. Currency
   let currency = 'PKR';
@@ -155,6 +203,13 @@ export function validateInsurancePolicyInput(input: CreateInsurancePolicyInput):
 
   // 6. Frequency
   const frequency = input.frequency ?? 'annually';
+  if (!VALID_INSURANCE_FREQUENCIES.includes(frequency)) {
+    throw new ValidationError(
+      `Invalid insurance frequency '${frequency}'. Permitted frequencies: ${VALID_INSURANCE_FREQUENCIES.join(', ')}`,
+      'frequency',
+      frequency
+    );
+  }
 
   // 7. Dates
   const startDate = parseAndValidateDate(input.startDate, 'startDate');
@@ -167,7 +222,7 @@ export function validateInsurancePolicyInput(input: CreateInsurancePolicyInput):
   const isActive = input.isActive !== undefined ? Boolean(input.isActive) : true;
 
   // 9. Notes
-  const notes = input.notes ? input.notes.trim() : null;
+  const notes = input.notes && input.notes.trim() !== '' ? input.notes.trim() : null;
 
   return {
     policyName,
@@ -200,13 +255,7 @@ export function validateInsurancePaymentInput(input: CreateInsurancePaymentInput
   const policyId = validateRecordId(input.policyId, 'InsurancePolicy');
 
   // 2. Amount
-  if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
-    throw new ValidationError('Payment amount must be a finite numeric value.', 'amount', input.amount);
-  }
-  if (input.amount <= 0) {
-    throw new ValidationError('Payment amount must be greater than zero.', 'amount', input.amount);
-  }
-  const amountDecimal = safeNumberToDecimal(input.amount, 'amount');
+  const amountDecimal = validateMonetaryAmount(input.amount, 'amount');
 
   // 3. Currency
   let currency = 'PKR';
@@ -231,7 +280,7 @@ export function validateInsurancePaymentInput(input: CreateInsurancePaymentInput
   }
 
   // 5. Notes
-  const notes = input.notes ? input.notes.trim() : null;
+  const notes = input.notes && input.notes.trim() !== '' ? input.notes.trim() : null;
 
   return {
     policyId,
@@ -253,12 +302,13 @@ export async function verifyInsurancePolicyAccess(
   policyId: string,
   userId: string
 ): Promise<{ id: string; policyName: string; category: DbInsuranceCategory }> {
+  const safeUserId = validateUserId(userId);
   const safePolicyId = validateRecordId(policyId, 'InsurancePolicy');
 
   const policy = await prisma.insurancePolicy.findFirst({
     where: {
       id: safePolicyId,
-      userId,
+      userId: safeUserId,
     },
     select: {
       id: true,
@@ -331,6 +381,15 @@ export async function listInsurancePolicies(
   }
   if (filter?.isActive !== undefined) {
     where.isActive = filter.isActive;
+  }
+  if (filter?.startDate || filter?.endDate) {
+    where.startDate = {};
+    if (filter.startDate) {
+      where.startDate.gte = parseAndValidateDate(filter.startDate, 'filter.startDate');
+    }
+    if (filter.endDate) {
+      where.startDate.lte = parseAndValidateDate(filter.endDate, 'filter.endDate');
+    }
   }
 
   const [totalCount, dbRecords] = await Promise.all([
@@ -410,22 +469,30 @@ export async function updateInsurancePolicy(
   }
 
   if (input.policyNumber !== undefined) {
-    updateData.policyNumber = input.policyNumber ? input.policyNumber.trim().slice(0, 100) : null;
+    updateData.policyNumber = input.policyNumber && input.policyNumber.trim() !== ''
+      ? input.policyNumber.trim().slice(0, 100)
+      : null;
   }
 
   if (input.provider !== undefined) {
-    updateData.provider = input.provider ? input.provider.trim().slice(0, 150) : null;
+    updateData.provider = input.provider && input.provider.trim() !== ''
+      ? input.provider.trim().slice(0, 150)
+      : null;
   }
 
   if (input.category !== undefined) {
+    if (!VALID_INSURANCE_CATEGORIES.includes(input.category)) {
+      throw new ValidationError(
+        `Invalid insurance category '${input.category}'. Permitted categories: ${VALID_INSURANCE_CATEGORIES.join(', ')}`,
+        'category',
+        input.category
+      );
+    }
     updateData.category = domainInsuranceCategoryToDb(input.category);
   }
 
   if (input.premiumAmount !== undefined) {
-    if (typeof input.premiumAmount !== 'number' || !Number.isFinite(input.premiumAmount) || input.premiumAmount <= 0) {
-      throw new ValidationError('premiumAmount must be a positive finite number.', 'premiumAmount', input.premiumAmount);
-    }
-    updateData.premiumAmount = safeNumberToDecimal(input.premiumAmount, 'premiumAmount');
+    updateData.premiumAmount = validateMonetaryAmount(input.premiumAmount, 'premiumAmount');
   }
 
   if (input.currency !== undefined) {
@@ -437,6 +504,13 @@ export async function updateInsurancePolicy(
   }
 
   if (input.frequency !== undefined) {
+    if (!VALID_INSURANCE_FREQUENCIES.includes(input.frequency)) {
+      throw new ValidationError(
+        `Invalid insurance frequency '${input.frequency}'. Permitted frequencies: ${VALID_INSURANCE_FREQUENCIES.join(', ')}`,
+        'frequency',
+        input.frequency
+      );
+    }
     updateData.frequency = domainInsuranceFrequencyToDb(input.frequency);
   }
 
@@ -455,7 +529,7 @@ export async function updateInsurancePolicy(
   }
 
   if (input.notes !== undefined) {
-    updateData.notes = input.notes ? input.notes.trim() : null;
+    updateData.notes = input.notes && input.notes.trim() !== '' ? input.notes.trim() : null;
   }
 
   const updated = await prisma.insurancePolicy.update({
@@ -555,7 +629,9 @@ export async function listInsurancePayments(
   if (filter?.periodMonth !== undefined) {
     where.periodMonth = filter.periodMonth;
   }
-  if (filter?.startDate || filter?.endDate) {
+  if (filter?.paymentDate !== undefined) {
+    where.paymentDate = parseAndValidateDate(filter.paymentDate, 'filter.paymentDate');
+  } else if (filter?.startDate || filter?.endDate) {
     where.paymentDate = {};
     if (filter.startDate) {
       where.paymentDate.gte = parseAndValidateDate(filter.startDate, 'filter.startDate');
@@ -652,10 +728,7 @@ export async function updateInsurancePayment(
   const updateData: Prisma.InsurancePaymentUpdateInput = {};
 
   if (input.amount !== undefined) {
-    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
-      throw new ValidationError('Updated amount must be a positive finite number.', 'amount', input.amount);
-    }
-    updateData.amount = safeNumberToDecimal(input.amount, 'amount');
+    updateData.amount = validateMonetaryAmount(input.amount, 'amount');
   }
 
   if (input.currency !== undefined) {
@@ -697,7 +770,7 @@ export async function updateInsurancePayment(
   }
 
   if (input.notes !== undefined) {
-    updateData.notes = input.notes ? input.notes.trim() : null;
+    updateData.notes = input.notes && input.notes.trim() !== '' ? input.notes.trim() : null;
   }
 
   const updated = await prisma.insurancePayment.update({

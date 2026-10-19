@@ -218,6 +218,8 @@ import {
   validateInvestmentRecordInput,
   validateInsurancePolicyInput,
   validateInsurancePaymentInput,
+  validateMonetaryAmount,
+  validateRecordId,
   normalizePagination,
   buildPaginationMeta,
   buildExpenseCategoryAccessFilter,
@@ -246,6 +248,10 @@ import {
   InsuranceCategory as DbInsuranceCategory,
   InsuranceFrequency as DbInsuranceFrequency,
 } from '@prisma/client';
+import type {
+  InsuranceCategory as DomainInsuranceCategory,
+  InsuranceFrequency as DomainInsuranceFrequency,
+} from '../types/financial';
 
 // 10a. validateUserId rejects empty or non-string
 let threwUserId = false;
@@ -764,6 +770,168 @@ try {
   }
 }
 assert(threwZeroPaymentDelete, 'Test 14an: verifyDeletionResult throws RecordNotFoundError for InsurancePayment');
+
+// 14ao-14ar: validateMonetaryAmount checks
+let threwSubCentAmount = false;
+try {
+  validateMonetaryAmount(100.555, 'premiumAmount');
+} catch (e) {
+  if (e instanceof ValidationError) threwSubCentAmount = true;
+}
+assert(threwSubCentAmount, 'Test 14ao: validateMonetaryAmount rejects sub-cent precision (>2 decimal places)');
+
+let threwMonetaryNaN = false;
+try {
+  validateMonetaryAmount(NaN, 'premiumAmount');
+} catch (e) {
+  if (e instanceof ValidationError) threwMonetaryNaN = true;
+}
+assert(threwMonetaryNaN, 'Test 14ap: validateMonetaryAmount rejects NaN');
+
+let threwMonetaryInf = false;
+try {
+  validateMonetaryAmount(Infinity, 'premiumAmount');
+} catch (e) {
+  if (e instanceof ValidationError) threwMonetaryInf = true;
+}
+assert(threwMonetaryInf, 'Test 14aq: validateMonetaryAmount rejects Infinity');
+
+let threwMonetaryLimit = false;
+try {
+  validateMonetaryAmount(99_000_000_000_000, 'premiumAmount');
+} catch (e) {
+  if (e instanceof ValidationError) threwMonetaryLimit = true;
+}
+assert(threwMonetaryLimit, 'Test 14ar: validateMonetaryAmount rejects amounts exceeding safe currency bounds');
+
+// 14as-14au: Additional InsurancePolicy input validation
+let threwInvalidCategory = false;
+try {
+  validateInsurancePolicyInput({
+    policyName: 'Invalid Policy',
+    category: 'marine' as unknown as DomainInsuranceCategory,
+    premiumAmount: 10000,
+    startDate: new Date(),
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwInvalidCategory = true;
+}
+assert(threwInvalidCategory, 'Test 14as: validateInsurancePolicyInput rejects invalid category');
+
+let threwInvalidFrequency = false;
+try {
+  validateInsurancePolicyInput({
+    policyName: 'Invalid Policy',
+    category: 'life',
+    frequency: 'daily' as unknown as DomainInsuranceFrequency,
+    premiumAmount: 10000,
+    startDate: new Date(),
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwInvalidFrequency = true;
+}
+assert(threwInvalidFrequency, 'Test 14at: validateInsurancePolicyInput rejects invalid frequency');
+
+let threwInvalidStartDate = false;
+try {
+  validateInsurancePolicyInput({
+    policyName: 'Invalid Policy',
+    category: 'life',
+    premiumAmount: 10000,
+    startDate: 'not-a-valid-date',
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwInvalidStartDate = true;
+}
+assert(threwInvalidStartDate, 'Test 14au: validateInsurancePolicyInput rejects unparseable startDate');
+
+// 14av-14ay: Additional InsurancePayment input validation
+let threwPaymentSubCent = false;
+try {
+  validateInsurancePaymentInput({
+    policyId: 'pol_123',
+    amount: 1500.888,
+    paymentDate: new Date(),
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwPaymentSubCent = true;
+}
+assert(threwPaymentSubCent, 'Test 14av: validateInsurancePaymentInput rejects sub-cent amount');
+
+let threwPaymentLowYear = false;
+try {
+  validateInsurancePaymentInput({
+    policyId: 'pol_123',
+    amount: 1500,
+    paymentDate: new Date(),
+    periodYear: 1850,
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwPaymentLowYear = true;
+}
+assert(threwPaymentLowYear, 'Test 14aw: validateInsurancePaymentInput rejects periodYear < 1900');
+
+let threwPaymentHighYear = false;
+try {
+  validateInsurancePaymentInput({
+    policyId: 'pol_123',
+    amount: 1500,
+    paymentDate: new Date(),
+    periodYear: 2150,
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwPaymentHighYear = true;
+}
+assert(threwPaymentHighYear, 'Test 14ax: validateInsurancePaymentInput rejects periodYear > 2100');
+
+let threwPaymentBadDate = false;
+try {
+  validateInsurancePaymentInput({
+    policyId: 'pol_123',
+    amount: 1500,
+    paymentDate: 'invalid-date-format',
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwPaymentBadDate = true;
+}
+assert(threwPaymentBadDate, 'Test 14ay: validateInsurancePaymentInput rejects unparseable paymentDate');
+
+// 14az: validateRecordId validation
+assert(validateRecordId('pol_valid_123', 'InsurancePolicy') === 'pol_valid_123', 'Test 14az: validateRecordId returns trimmed valid ID');
+
+// 14ba-14bb: Multi-tenant ownership verification simulation
+function simulateVerifyInsurancePolicyAccess(
+  policy: { id: string; userId: string; policyName: string; category: DbInsuranceCategory } | null,
+  requestedPolicyId: string,
+  callerUserId: string
+) {
+  const safePolicyId = validateRecordId(requestedPolicyId, 'InsurancePolicy');
+  const safeCallerId = validateUserId(callerUserId);
+  if (!policy || policy.id !== safePolicyId || policy.userId !== safeCallerId) {
+    throw new RecordNotFoundError('InsurancePolicy', safePolicyId);
+  }
+  return { id: policy.id, policyName: policy.policyName, category: policy.category };
+}
+
+const tenantAlicePolicy = {
+  id: 'pol_alice_1',
+  userId: 'usr_alice',
+  policyName: 'Alice Life Plan',
+  category: DbInsuranceCategory.LIFE,
+};
+
+const accessedByAlice = simulateVerifyInsurancePolicyAccess(tenantAlicePolicy, 'pol_alice_1', 'usr_alice');
+assert(accessedByAlice.id === 'pol_alice_1', 'Test 14ba: Policy access granted to authorized tenant');
+
+let threwCrossTenantAccess = false;
+try {
+  simulateVerifyInsurancePolicyAccess(tenantAlicePolicy, 'pol_alice_1', 'usr_bob');
+} catch (e) {
+  if (e instanceof RecordNotFoundError && e.recordId === 'pol_alice_1') {
+    threwCrossTenantAccess = true;
+  }
+}
+assert(threwCrossTenantAccess, 'Test 14bb: Cross-tenant policy access throws RecordNotFoundError without leaking existence');
 
 console.log('\n--- Verification Summary ---');
 if (failures === 0) {
