@@ -933,6 +933,317 @@ try {
 }
 assert(threwCrossTenantAccess, 'Test 14bb: Cross-tenant policy access throws RecordNotFoundError without leaking existence');
 
+// ==============================================================================
+// 15. MongoDB Decimal128 Precision & Safety Tests
+// ==============================================================================
+import { Types } from 'mongoose';
+import {
+  numberToDecimal128,
+  decimal128ToSafeNumber,
+  optionalDecimal128ToSafeNumber,
+  decimal128ToString,
+  validateMonetaryNumber,
+  UnsafeDecimalConversionError as MongoDecimalError,
+} from '../lib/db/decimal';
+
+// 15a: numberToDecimal128 converts accurately with 2 decimal places
+const d1 = numberToDecimal128(250000.5);
+assert(d1.toString() === '250000.50', 'Test 15a: numberToDecimal128 formats with exact 2 decimal places', d1.toString(), '250000.50');
+
+// 15b: decimal128ToSafeNumber converts Types.Decimal128 to exact number
+const n1 = decimal128ToSafeNumber(d1);
+assert(n1 === 250000.5, 'Test 15b: decimal128ToSafeNumber converts Decimal128 to exact number', n1, 250000.5);
+
+// 15c: decimal128ToSafeNumber converts safe numeric input
+const n2 = decimal128ToSafeNumber(15400.75);
+assert(n2 === 15400.75, 'Test 15c: decimal128ToSafeNumber accepts and validates safe number', n2, 15400.75);
+
+// 15d: decimal128ToSafeNumber rejects null and undefined
+let threwNullDec128 = false;
+try {
+  decimal128ToSafeNumber(null);
+} catch (e) {
+  if (e instanceof MongoDecimalError) threwNullDec128 = true;
+}
+assert(threwNullDec128, 'Test 15d: decimal128ToSafeNumber rejects null on required field');
+
+// 15e: decimal128ToSafeNumber rejects sub-cent precision (>2 decimals)
+let threwSubCentDec128 = false;
+try {
+  decimal128ToSafeNumber(Types.Decimal128.fromString('100.555'));
+} catch (e) {
+  if (e instanceof MongoDecimalError) threwSubCentDec128 = true;
+}
+assert(threwSubCentDec128, 'Test 15e: decimal128ToSafeNumber rejects sub-cent Decimal128 (100.555)');
+
+// 15f: decimal128ToSafeNumber rejects magnitude exceeding 90 trillion
+let threwOverflowDec128 = false;
+try {
+  decimal128ToSafeNumber(Types.Decimal128.fromString('99999999999999999999'));
+} catch (e) {
+  if (e instanceof MongoDecimalError) threwOverflowDec128 = true;
+}
+assert(threwOverflowDec128, 'Test 15f: decimal128ToSafeNumber rejects magnitude > 90 trillion');
+
+// 15g: decimal128ToSafeNumber rejects NaN and Infinity
+let threwNaNDec128 = false;
+try {
+  decimal128ToSafeNumber(Types.Decimal128.fromString('NaN'));
+} catch (e) {
+  if (e instanceof MongoDecimalError) threwNaNDec128 = true;
+}
+assert(threwNaNDec128, 'Test 15g: decimal128ToSafeNumber rejects NaN');
+
+// 15h: validateMonetaryNumber rejects NaN and non-finite
+let threwNumNaN = false;
+try {
+  validateMonetaryNumber(NaN);
+} catch (e) {
+  if (e instanceof MongoDecimalError) threwNumNaN = true;
+}
+assert(threwNumNaN, 'Test 15h: validateMonetaryNumber rejects NaN');
+
+// 15i: optionalDecimal128ToSafeNumber safely handles null and undefined
+assert(optionalDecimal128ToSafeNumber(null) === undefined, 'Test 15i: optionalDecimal128ToSafeNumber returns undefined for null');
+assert(optionalDecimal128ToSafeNumber(undefined) === undefined, 'Test 15j: optionalDecimal128ToSafeNumber returns undefined for undefined');
+assert(optionalDecimal128ToSafeNumber(Types.Decimal128.fromString('500.25')) === 500.25, 'Test 15k: optionalDecimal128ToSafeNumber converts valid value');
+
+// 15l: decimal128ToString formats cleanly to 2 decimal places
+assert(decimal128ToString(Types.Decimal128.fromString('1234.5')) === '1234.50', 'Test 15l: decimal128ToString formats 1234.5 to 1234.50');
+assert(decimal128ToString(null) === null, 'Test 15m: decimal128ToString returns null for null input');
+
+// ==============================================================================
+// 16. MongoDB Model Schemas & Multi-Tenant Index Verification
+// ==============================================================================
+import {
+  UserModel,
+  FinancialProfileModel,
+  CategoryModel,
+  SalaryRecordModel,
+  ExpenseModel,
+  SavingsGoalModel,
+  SavingsRecordModel,
+  InvestmentAssetModel,
+  InvestmentRecordModel,
+  InsurancePolicyModel,
+  InsurancePaymentModel,
+  LoanModel,
+  LoanRepaymentModel,
+} from '../lib/db/models';
+
+assert(Boolean(UserModel?.schema), 'Test 16a: UserModel is registered with schema');
+assert(Boolean(FinancialProfileModel?.schema), 'Test 16b: FinancialProfileModel is registered with schema');
+assert(Boolean(CategoryModel?.schema), 'Test 16c: CategoryModel is registered with schema');
+assert(Boolean(SalaryRecordModel?.schema), 'Test 16d: SalaryRecordModel is registered with schema');
+assert(Boolean(ExpenseModel?.schema), 'Test 16e: ExpenseModel is registered with schema');
+assert(Boolean(SavingsGoalModel?.schema), 'Test 16f: SavingsGoalModel is registered with schema');
+assert(Boolean(SavingsRecordModel?.schema), 'Test 16g: SavingsRecordModel is registered with schema');
+assert(Boolean(InvestmentAssetModel?.schema), 'Test 16h: InvestmentAssetModel is registered with schema');
+assert(Boolean(InvestmentRecordModel?.schema), 'Test 16i: InvestmentRecordModel is registered with schema');
+assert(Boolean(InsurancePolicyModel?.schema), 'Test 16j: InsurancePolicyModel is registered with schema');
+assert(Boolean(InsurancePaymentModel?.schema), 'Test 16k: InsurancePaymentModel is registered with schema');
+assert(Boolean(LoanModel?.schema), 'Test 16l: LoanModel is registered with schema');
+assert(Boolean(LoanRepaymentModel?.schema), 'Test 16m: LoanRepaymentModel is registered with schema');
+
+// Verify multi-tenant collections enforce userId field in schema
+const modelsWithTenant = [
+  { name: 'FinancialProfile', schema: FinancialProfileModel.schema },
+  { name: 'Category', schema: CategoryModel.schema },
+  { name: 'SalaryRecord', schema: SalaryRecordModel.schema },
+  { name: 'Expense', schema: ExpenseModel.schema },
+  { name: 'SavingsGoal', schema: SavingsGoalModel.schema },
+  { name: 'SavingsRecord', schema: SavingsRecordModel.schema },
+  { name: 'InvestmentAsset', schema: InvestmentAssetModel.schema },
+  { name: 'InvestmentRecord', schema: InvestmentRecordModel.schema },
+  { name: 'InsurancePolicy', schema: InsurancePolicyModel.schema },
+  { name: 'InsurancePayment', schema: InsurancePaymentModel.schema },
+  { name: 'Loan', schema: LoanModel.schema },
+  { name: 'LoanRepayment', schema: LoanRepaymentModel.schema },
+];
+
+for (const { name, schema } of modelsWithTenant) {
+  const hasUserId = Boolean(schema.path('userId'));
+  assert(hasUserId, `Test 16n: ${name} schema contains required multi-tenant userId path`);
+}
+
+// Verify Decimal128 schema fields use Schema.Types.Decimal128
+assert(SalaryRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16o: SalaryRecord amount path is Decimal128');
+assert(ExpenseModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16p: Expense amount path is Decimal128');
+assert(SavingsRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16q: SavingsRecord amount path is Decimal128');
+assert(InvestmentRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16r: InvestmentRecord amount path is Decimal128');
+assert(InsurancePolicyModel.schema.path('premiumAmount')?.instance === 'Decimal128', 'Test 16s: InsurancePolicy premiumAmount path is Decimal128');
+assert(InsurancePaymentModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16t: InsurancePayment amount path is Decimal128');
+assert(LoanModel.schema.path('principalAmount')?.instance === 'Decimal128', 'Test 16u: Loan principalAmount path is Decimal128');
+assert(LoanRepaymentModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16v: LoanRepayment amount path is Decimal128');
+
+// ==============================================================================
+// 17. MongoDB Document Mappers & Type Safety Tests
+// ==============================================================================
+import {
+  mapMongoSalaryRecordToDomain,
+  mapMongoExpenseRecordToDomain,
+  mapMongoLoanToDomain,
+  mapMongoLoanRepaymentToDomain,
+  mapMongoCategoryToDomain,
+  mapMongoUserToDomain,
+  mongoSalaryTypeToDomain,
+  domainSalaryTypeToMongo,
+  mongoExpenseTypeToDomain,
+  domainExpenseTypeToMongo,
+  mongoPaymentFrequencyToDomain,
+  domainPaymentFrequencyToMongo,
+  mongoSavingsCategoryToDomain,
+  domainSavingsCategoryToMongo,
+  mongoInvestmentTypeToDomain,
+  domainInvestmentTypeToMongo,
+  mongoInsuranceCategoryToDomain,
+  domainInsuranceCategoryToMongo,
+  mongoInsuranceFrequencyToDomain,
+  domainInsuranceFrequencyToMongo,
+  mongoLoanFrequencyToDomain,
+  domainLoanFrequencyToMongo,
+} from '../lib/db/mongo-mappers';
+
+// 17a: Enum bidirectional mappings
+assert(mongoSalaryTypeToDomain('PRIMARY') === 'primary', 'Test 17a: mongoSalaryTypeToDomain PRIMARY -> primary');
+assert(domainSalaryTypeToMongo('bonus') === 'BONUS', 'Test 17b: domainSalaryTypeToMongo bonus -> BONUS');
+assert(mongoExpenseTypeToDomain('FIXED') === 'fixed', 'Test 17c: mongoExpenseTypeToDomain FIXED -> fixed');
+assert(domainExpenseTypeToMongo('variable') === 'VARIABLE', 'Test 17d: domainExpenseTypeToMongo variable -> VARIABLE');
+assert(mongoPaymentFrequencyToDomain('MONTHLY') === 'monthly', 'Test 17e: mongoPaymentFrequencyToDomain MONTHLY -> monthly');
+assert(domainPaymentFrequencyToMongo('quarterly') === 'QUARTERLY', 'Test 17f: domainPaymentFrequencyToMongo quarterly -> QUARTERLY');
+assert(mongoSavingsCategoryToDomain('HAJJ_UMRAH') === 'hajj_umrah', 'Test 17g: mongoSavingsCategoryToDomain HAJJ_UMRAH -> hajj_umrah');
+assert(domainSavingsCategoryToMongo('wedding') === 'WEDDING', 'Test 17h: domainSavingsCategoryToMongo wedding -> WEDDING');
+assert(mongoInvestmentTypeToDomain('REAL_ESTATE') === 'real_estate', 'Test 17i: mongoInvestmentTypeToDomain REAL_ESTATE -> real_estate');
+assert(domainInvestmentTypeToMongo('gold_precious_metals') === 'GOLD_PRECIOUS_METALS', 'Test 17j: domainInvestmentTypeToMongo gold_precious_metals -> GOLD_PRECIOUS_METALS');
+assert(mongoInsuranceCategoryToDomain('HEALTH') === 'health', 'Test 17k: mongoInsuranceCategoryToDomain HEALTH -> health');
+assert(domainInsuranceCategoryToMongo('life') === 'LIFE', 'Test 17l: domainInsuranceCategoryToMongo life -> LIFE');
+assert(mongoInsuranceFrequencyToDomain('ANNUALLY') === 'annually', 'Test 17m: mongoInsuranceFrequencyToDomain ANNUALLY -> annually');
+assert(domainInsuranceFrequencyToMongo('semi-annually') === 'SEMI_ANNUALLY', 'Test 17n: domainInsuranceFrequencyToMongo semi-annually -> SEMI_ANNUALLY');
+assert(mongoLoanFrequencyToDomain('BIWEEKLY') === 'biweekly', 'Test 17o: mongoLoanFrequencyToDomain BIWEEKLY -> biweekly');
+assert(domainLoanFrequencyToMongo('monthly') === 'MONTHLY', 'Test 17p: domainLoanFrequencyToMongo monthly -> MONTHLY');
+
+// 17q: mapMongoSalaryRecordToDomain
+const mockMongoSalaryDoc = {
+  _id: new Types.ObjectId(),
+  userId: 'usr_mongo_1',
+  amount: Types.Decimal128.fromString('425000.00'),
+  currency: 'PKR',
+  salaryType: 'PRIMARY' as const,
+  payPeriodYear: 2026,
+  payPeriodMonth: 10,
+  paymentDate: now,
+  employerOrSource: 'Mongo Global',
+  notes: null,
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoSalary = mapMongoSalaryRecordToDomain(mockMongoSalaryDoc as any);
+assert(mappedMongoSalary.amount === 425000, 'Test 17q: mapMongoSalaryRecordToDomain converts Decimal128 amount to 425000');
+assert(mappedMongoSalary.id === mockMongoSalaryDoc._id.toString(), 'Test 17r: mapMongoSalaryRecordToDomain extracts string id from _id');
+assert(mappedMongoSalary.salaryType === 'primary', 'Test 17s: mapMongoSalaryRecordToDomain maps salaryType PRIMARY -> primary');
+
+// 17t: mapMongoExpenseRecordToDomain
+const mockMongoExpenseDoc = {
+  _id: new Types.ObjectId(),
+  userId: 'usr_mongo_1',
+  categoryId: 'cat_groceries',
+  amount: Types.Decimal128.fromString('18500.50'),
+  currency: 'PKR',
+  expenseType: 'VARIABLE' as const,
+  date: now,
+  periodYear: 2026,
+  periodMonth: 10,
+  description: 'Monthly groceries',
+  isRecurring: false,
+  recurringFrequency: null,
+  notes: null,
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoExpense = mapMongoExpenseRecordToDomain(mockMongoExpenseDoc as any, 'groceries');
+assert(mappedMongoExpense.amount === 18500.5, 'Test 17t: mapMongoExpenseRecordToDomain maps amount to 18500.5');
+assert(mappedMongoExpense.category === 'groceries', 'Test 17u: mapMongoExpenseRecordToDomain resolves category slug');
+assert(mappedMongoExpense.expenseType === 'variable', 'Test 17v: mapMongoExpenseRecordToDomain maps expenseType VARIABLE -> variable');
+
+// 17w: mapMongoLoanToDomain
+const mockMongoLoanDoc = {
+  _id: new Types.ObjectId(),
+  userId: 'usr_mongo_1',
+  loanTitle: 'Home Construction Loan',
+  lenderName: 'Bank Alfalah',
+  principalAmount: Types.Decimal128.fromString('2000000.00'),
+  outstandingAmount: Types.Decimal128.fromString('1750000.00'),
+  interestRate: Types.Decimal128.fromString('12.50'),
+  installmentAmount: Types.Decimal128.fromString('45000.00'),
+  frequency: 'MONTHLY' as const,
+  startDate: now,
+  endDate: null,
+  isClosed: false,
+  notes: 'Fixed rate mortgage',
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoLoan = mapMongoLoanToDomain(mockMongoLoanDoc as any);
+assert(mappedMongoLoan.principalAmount === 2000000, 'Test 17w: mapMongoLoanToDomain maps principalAmount');
+assert(mappedMongoLoan.outstandingAmount === 1750000, 'Test 17x: mapMongoLoanToDomain maps outstandingAmount');
+assert(mappedMongoLoan.interestRate === 12.5, 'Test 17y: mapMongoLoanToDomain maps interestRate');
+assert(mappedMongoLoan.installmentAmount === 45000, 'Test 17z: mapMongoLoanToDomain maps installmentAmount');
+assert(mappedMongoLoan.frequency === 'monthly', 'Test 17aa: mapMongoLoanToDomain maps frequency MONTHLY -> monthly');
+
+// 17ab: mapMongoLoanRepaymentToDomain
+const mockMongoRepaymentDoc = {
+  _id: new Types.ObjectId(),
+  userId: 'usr_mongo_1',
+  loanId: mappedMongoLoan.id,
+  amount: Types.Decimal128.fromString('45000.00'),
+  principalComponent: Types.Decimal128.fromString('25000.00'),
+  interestComponent: Types.Decimal128.fromString('20000.00'),
+  paymentDate: now,
+  periodYear: 2026,
+  periodMonth: 10,
+  notes: null,
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoRepayment = mapMongoLoanRepaymentToDomain(mockMongoRepaymentDoc as any);
+assert(mappedMongoRepayment.amount === 45000, 'Test 17ab: mapMongoLoanRepaymentToDomain maps repayment amount');
+assert(mappedMongoRepayment.principalComponent === 25000, 'Test 17ac: mapMongoLoanRepaymentToDomain maps principal component');
+assert(mappedMongoRepayment.interestComponent === 20000, 'Test 17ad: mapMongoLoanRepaymentToDomain maps interest component');
+
+// 17ae: mapMongoCategoryToDomain
+const mockMongoCategoryDoc = {
+  _id: new Types.ObjectId(),
+  userId: null,
+  name: 'Housing & Rent',
+  slug: 'housing',
+  type: 'EXPENSE' as const,
+  defaultExpenseType: 'FIXED' as const,
+  icon: 'home',
+  color: '#4F46E5',
+  isSystem: true,
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoCategory = mapMongoCategoryToDomain(mockMongoCategoryDoc as any);
+assert(mappedMongoCategory.slug === 'housing', 'Test 17ae: mapMongoCategoryToDomain maps slug');
+assert(mappedMongoCategory.type === 'expense', 'Test 17af: mapMongoCategoryToDomain maps type EXPENSE -> expense');
+assert(mappedMongoCategory.defaultExpenseType === 'fixed', 'Test 17ag: mapMongoCategoryToDomain maps defaultExpenseType FIXED -> fixed');
+assert(mappedMongoCategory.isSystem === true, 'Test 17ah: mapMongoCategoryToDomain preserves isSystem flag');
+
+// 17ai: mapMongoUserToDomain
+const mockMongoUserDoc = {
+  _id: new Types.ObjectId(),
+  email: 'ali@fintrack.app',
+  name: 'Ali Raza',
+  image: 'https://avatar.test/ali.png',
+  createdAt: now,
+  updatedAt: now,
+};
+const mappedMongoUser = mapMongoUserToDomain(mockMongoUserDoc as any);
+assert(mappedMongoUser.email === 'ali@fintrack.app', 'Test 17ai: mapMongoUserToDomain maps email');
+assert(mappedMongoUser.name === 'Ali Raza', 'Test 17aj: mapMongoUserToDomain maps name');
+assert(mappedMongoUser.id === mockMongoUserDoc._id.toString(), 'Test 17ak: mapMongoUserToDomain maps string id from _id');
+
 console.log('\n--- Verification Summary ---');
 if (failures === 0) {
   console.log('ALL TESTS PASSED SUCCESSFULLY! (0 failures)\n');
@@ -940,3 +1251,4 @@ if (failures === 0) {
   console.error(`TESTS FAILED: ${failures} failure(s) detected.\n`);
   process.exit(1);
 }
+
