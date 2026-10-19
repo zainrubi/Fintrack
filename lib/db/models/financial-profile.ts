@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export interface IFinancialProfile extends Document {
   userId: string;
@@ -31,14 +30,10 @@ export const FinancialProfileSchema = new Schema<IFinancialProfile>(
     monthlyIncomeTarget: {
       type: Schema.Types.Decimal128,
       default: null,
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     monthlySavingsTarget: {
       type: Schema.Types.Decimal128,
       default: null,
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     emergencyFundTargetMonths: {
       type: Number,

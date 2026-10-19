@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export type SalaryType =
   | 'PRIMARY'
@@ -34,8 +33,6 @@ export const SalaryRecordSchema = new Schema<ISalaryRecord>(
     amount: {
       type: Schema.Types.Decimal128,
       required: [true, 'Salary amount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     currency: {
       type: String,

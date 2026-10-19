@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 import type { SavingsCategory } from './savings-goal';
 
 export interface ISavingsRecord extends Document {
@@ -31,8 +30,6 @@ export const SavingsRecordSchema = new Schema<ISavingsRecord>(
     amount: {
       type: Schema.Types.Decimal128,
       required: [true, 'Savings amount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     currency: {
       type: String,

@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export interface ILoanRepayment extends Document {
   userId: string;
@@ -30,20 +29,14 @@ export const LoanRepaymentSchema = new Schema<ILoanRepayment>(
     amount: {
       type: Schema.Types.Decimal128,
       required: [true, 'Repayment amount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     principalComponent: {
       type: Schema.Types.Decimal128,
       default: null,
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     interestComponent: {
       type: Schema.Types.Decimal128,
       default: null,
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     paymentDate: {
       type: Date,

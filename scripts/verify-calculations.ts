@@ -1029,6 +1029,12 @@ import {
   InsurancePaymentModel,
   LoanModel,
   LoanRepaymentModel,
+  type IUser,
+  type ICategory,
+  type ISalaryRecord,
+  type IExpense,
+  type ILoan,
+  type ILoanRepayment,
 } from '../lib/db/models';
 
 assert(Boolean(UserModel?.schema), 'Test 16a: UserModel is registered with schema');
@@ -1062,19 +1068,19 @@ const modelsWithTenant = [
 ];
 
 for (const { name, schema } of modelsWithTenant) {
-  const hasUserId = Boolean(schema.path('userId'));
+  const hasUserId = Boolean(schema.paths['userId']);
   assert(hasUserId, `Test 16n: ${name} schema contains required multi-tenant userId path`);
 }
 
 // Verify Decimal128 schema fields use Schema.Types.Decimal128
-assert(SalaryRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16o: SalaryRecord amount path is Decimal128');
-assert(ExpenseModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16p: Expense amount path is Decimal128');
-assert(SavingsRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16q: SavingsRecord amount path is Decimal128');
-assert(InvestmentRecordModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16r: InvestmentRecord amount path is Decimal128');
-assert(InsurancePolicyModel.schema.path('premiumAmount')?.instance === 'Decimal128', 'Test 16s: InsurancePolicy premiumAmount path is Decimal128');
-assert(InsurancePaymentModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16t: InsurancePayment amount path is Decimal128');
-assert(LoanModel.schema.path('principalAmount')?.instance === 'Decimal128', 'Test 16u: Loan principalAmount path is Decimal128');
-assert(LoanRepaymentModel.schema.path('amount')?.instance === 'Decimal128', 'Test 16v: LoanRepayment amount path is Decimal128');
+assert(SalaryRecordModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16o: SalaryRecord amount path is Decimal128');
+assert(ExpenseModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16p: Expense amount path is Decimal128');
+assert(SavingsRecordModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16q: SavingsRecord amount path is Decimal128');
+assert(InvestmentRecordModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16r: InvestmentRecord amount path is Decimal128');
+assert(InsurancePolicyModel.schema.paths['premiumAmount']?.instance === 'Decimal128', 'Test 16s: InsurancePolicy premiumAmount path is Decimal128');
+assert(InsurancePaymentModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16t: InsurancePayment amount path is Decimal128');
+assert(LoanModel.schema.paths['principalAmount']?.instance === 'Decimal128', 'Test 16u: Loan principalAmount path is Decimal128');
+assert(LoanRepaymentModel.schema.paths['amount']?.instance === 'Decimal128', 'Test 16v: LoanRepayment amount path is Decimal128');
 
 // ==============================================================================
 // 17. MongoDB Document Mappers & Type Safety Tests
@@ -1137,7 +1143,7 @@ const mockMongoSalaryDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoSalary = mapMongoSalaryRecordToDomain(mockMongoSalaryDoc as any);
+const mappedMongoSalary = mapMongoSalaryRecordToDomain(mockMongoSalaryDoc as unknown as ISalaryRecord);
 assert(mappedMongoSalary.amount === 425000, 'Test 17q: mapMongoSalaryRecordToDomain converts Decimal128 amount to 425000');
 assert(mappedMongoSalary.id === mockMongoSalaryDoc._id.toString(), 'Test 17r: mapMongoSalaryRecordToDomain extracts string id from _id');
 assert(mappedMongoSalary.salaryType === 'primary', 'Test 17s: mapMongoSalaryRecordToDomain maps salaryType PRIMARY -> primary');
@@ -1160,7 +1166,7 @@ const mockMongoExpenseDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoExpense = mapMongoExpenseRecordToDomain(mockMongoExpenseDoc as any, 'groceries');
+const mappedMongoExpense = mapMongoExpenseRecordToDomain(mockMongoExpenseDoc as unknown as IExpense, 'groceries');
 assert(mappedMongoExpense.amount === 18500.5, 'Test 17t: mapMongoExpenseRecordToDomain maps amount to 18500.5');
 assert(mappedMongoExpense.category === 'groceries', 'Test 17u: mapMongoExpenseRecordToDomain resolves category slug');
 assert(mappedMongoExpense.expenseType === 'variable', 'Test 17v: mapMongoExpenseRecordToDomain maps expenseType VARIABLE -> variable');
@@ -1183,7 +1189,7 @@ const mockMongoLoanDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoLoan = mapMongoLoanToDomain(mockMongoLoanDoc as any);
+const mappedMongoLoan = mapMongoLoanToDomain(mockMongoLoanDoc as unknown as ILoan);
 assert(mappedMongoLoan.principalAmount === 2000000, 'Test 17w: mapMongoLoanToDomain maps principalAmount');
 assert(mappedMongoLoan.outstandingAmount === 1750000, 'Test 17x: mapMongoLoanToDomain maps outstandingAmount');
 assert(mappedMongoLoan.interestRate === 12.5, 'Test 17y: mapMongoLoanToDomain maps interestRate');
@@ -1205,7 +1211,7 @@ const mockMongoRepaymentDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoRepayment = mapMongoLoanRepaymentToDomain(mockMongoRepaymentDoc as any);
+const mappedMongoRepayment = mapMongoLoanRepaymentToDomain(mockMongoRepaymentDoc as unknown as ILoanRepayment);
 assert(mappedMongoRepayment.amount === 45000, 'Test 17ab: mapMongoLoanRepaymentToDomain maps repayment amount');
 assert(mappedMongoRepayment.principalComponent === 25000, 'Test 17ac: mapMongoLoanRepaymentToDomain maps principal component');
 assert(mappedMongoRepayment.interestComponent === 20000, 'Test 17ad: mapMongoLoanRepaymentToDomain maps interest component');
@@ -1224,7 +1230,7 @@ const mockMongoCategoryDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoCategory = mapMongoCategoryToDomain(mockMongoCategoryDoc as any);
+const mappedMongoCategory = mapMongoCategoryToDomain(mockMongoCategoryDoc as unknown as ICategory);
 assert(mappedMongoCategory.slug === 'housing', 'Test 17ae: mapMongoCategoryToDomain maps slug');
 assert(mappedMongoCategory.type === 'expense', 'Test 17af: mapMongoCategoryToDomain maps type EXPENSE -> expense');
 assert(mappedMongoCategory.defaultExpenseType === 'fixed', 'Test 17ag: mapMongoCategoryToDomain maps defaultExpenseType FIXED -> fixed');
@@ -1239,7 +1245,7 @@ const mockMongoUserDoc = {
   createdAt: now,
   updatedAt: now,
 };
-const mappedMongoUser = mapMongoUserToDomain(mockMongoUserDoc as any);
+const mappedMongoUser = mapMongoUserToDomain(mockMongoUserDoc as unknown as IUser);
 assert(mappedMongoUser.email === 'ali@fintrack.app', 'Test 17ai: mapMongoUserToDomain maps email');
 assert(mappedMongoUser.name === 'Ali Raza', 'Test 17aj: mapMongoUserToDomain maps name');
 assert(mappedMongoUser.id === mockMongoUserDoc._id.toString(), 'Test 17ak: mapMongoUserToDomain maps string id from _id');

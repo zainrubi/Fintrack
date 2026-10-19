@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export type InsuranceCategory =
   | 'HEALTH'
@@ -65,8 +64,6 @@ export const InsurancePolicySchema = new Schema<IInsurancePolicy>(
     premiumAmount: {
       type: Schema.Types.Decimal128,
       required: [true, 'premiumAmount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     currency: {
       type: String,

@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export type SavingsCategory =
   | 'EMERGENCY_FUND'
@@ -56,8 +55,6 @@ export const SavingsGoalSchema = new Schema<ISavingsGoal>(
     targetAmount: {
       type: Schema.Types.Decimal128,
       default: null,
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     targetDate: {
       type: Date,

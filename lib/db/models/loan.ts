@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export type LoanFrequency = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY';
 
@@ -42,26 +41,18 @@ export const LoanSchema = new Schema<ILoan>(
     principalAmount: {
       type: Schema.Types.Decimal128,
       required: [true, 'principalAmount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     outstandingAmount: {
       type: Schema.Types.Decimal128,
       required: [true, 'outstandingAmount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     interestRate: {
       type: Schema.Types.Decimal128,
       required: [true, 'interestRate is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     installmentAmount: {
       type: Schema.Types.Decimal128,
       required: [true, 'installmentAmount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     frequency: {
       type: String,

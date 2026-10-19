@@ -1,7 +1,7 @@
 import mongoose, { Document, Model, Schema } from 'mongoose';
+import type { ExpenseType } from './expense';
 
 export type CategoryType = 'EXPENSE' | 'SAVINGS' | 'INVESTMENT' | 'INSURANCE';
-export type ExpenseType = 'FIXED' | 'VARIABLE';
 
 export interface ICategory extends Document {
   userId?: string | null;

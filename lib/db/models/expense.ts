@@ -1,5 +1,4 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
-import { decimal128Getter, decimal128Setter } from '../decimal';
 
 export type ExpenseType = 'FIXED' | 'VARIABLE';
 export type PaymentFrequency =
@@ -44,8 +43,6 @@ export const ExpenseSchema = new Schema<IExpense>(
     amount: {
       type: Schema.Types.Decimal128,
       required: [true, 'Expense amount is required.'],
-      get: decimal128Getter,
-      set: decimal128Setter,
     },
     currency: {
       type: String,
