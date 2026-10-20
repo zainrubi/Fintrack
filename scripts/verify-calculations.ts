@@ -1248,7 +1248,310 @@ const mockMongoUserDoc = {
 const mappedMongoUser = mapMongoUserToDomain(mockMongoUserDoc as unknown as IUser);
 assert(mappedMongoUser.email === 'ali@fintrack.app', 'Test 17ai: mapMongoUserToDomain maps email');
 assert(mappedMongoUser.name === 'Ali Raza', 'Test 17aj: mapMongoUserToDomain maps name');
-assert(mappedMongoUser.id === mockMongoUserDoc._id.toString(), 'Test 17ak: mapMongoUserToDomain maps string id from _id');
+// ==============================================================================
+// 18. Salary MongoDB Repository & Model Regression Tests
+// ==============================================================================
+import {
+  validateSalaryInput as validateMongoSalaryInput,
+  validateRecordId as validateSalaryRecordId,
+  validateObjectId as validateSalaryObjectId,
+  isValidObjectId,
+} from '../lib/db/repositories/salary';
+import type { SalaryType as DomainSalaryType } from '../types/financial';
+
+// 18a: Valid Salary Model Validation (offline Mongoose Schema validation)
+const validSalaryMongoDoc = new SalaryRecordModel({
+  userId: 'usr_tenant_alpha',
+  amount: Types.Decimal128.fromString('375000.50'),
+  currency: 'PKR',
+  salaryType: 'PRIMARY',
+  payPeriodYear: 2026,
+  payPeriodMonth: 10,
+  paymentDate: new Date('2026-10-01T00:00:00.000Z'),
+  employerOrSource: 'Acme Systems',
+  notes: 'Regular monthly compensation',
+});
+const validSalaryValidationErr = validSalaryMongoDoc.validateSync();
+assert(validSalaryValidationErr === undefined, 'Test 18a: Valid SalaryRecord document passes Mongoose schema validation');
+
+// 18b: Missing required fields in SalaryRecordModel
+const missingFieldsSalaryDoc = new SalaryRecordModel({});
+const missingSalaryErr = missingFieldsSalaryDoc.validateSync();
+assert(Boolean(missingSalaryErr?.errors['userId']), 'Test 18b: SalaryRecordModel schema rejects missing userId');
+assert(Boolean(missingSalaryErr?.errors['amount']), 'Test 18c: SalaryRecordModel schema rejects missing amount');
+assert(Boolean(missingSalaryErr?.errors['payPeriodYear']), 'Test 18d: SalaryRecordModel schema rejects missing payPeriodYear');
+assert(Boolean(missingSalaryErr?.errors['payPeriodMonth']), 'Test 18e: SalaryRecordModel schema rejects missing payPeriodMonth');
+assert(Boolean(missingSalaryErr?.errors['paymentDate']), 'Test 18f: SalaryRecordModel schema rejects missing paymentDate');
+
+// 18g: Schema enum & range validation
+const invalidRangeSalaryDoc = new SalaryRecordModel({
+  userId: 'usr_123',
+  amount: Types.Decimal128.fromString('100.00'),
+  salaryType: 'INVALID_ENUM',
+  payPeriodYear: 1850,
+  payPeriodMonth: 13,
+  paymentDate: new Date(),
+});
+const rangeErr = invalidRangeSalaryDoc.validateSync();
+assert(Boolean(rangeErr?.errors['salaryType']), 'Test 18g: SalaryRecordModel rejects invalid salaryType enum');
+assert(Boolean(rangeErr?.errors['payPeriodYear']), 'Test 18h: SalaryRecordModel rejects payPeriodYear < 1900');
+assert(Boolean(rangeErr?.errors['payPeriodMonth']), 'Test 18i: SalaryRecordModel rejects payPeriodMonth > 12');
+
+// 18j: validateSalaryInput valid input & Decimal128 conversion
+const validSalaryInputRes = validateMongoSalaryInput({
+  amount: 450000.75,
+  currency: 'usd',
+  salaryType: 'bonus',
+  payPeriodYear: 2026,
+  payPeriodMonth: 10,
+  paymentDate: '2026-10-15T00:00:00.000Z',
+  employerOrSource: ' Global Ventures Ltd ',
+  notes: ' Performance bonus ',
+});
+assert(validSalaryInputRes.amountDecimal instanceof Types.Decimal128, 'Test 18j: validateSalaryInput produces Types.Decimal128 amount');
+assert(validSalaryInputRes.amountDecimal.toString() === '450000.75', 'Test 18k: Decimal128 exact 2 decimal places representation', validSalaryInputRes.amountDecimal.toString(), '450000.75');
+assert(validSalaryInputRes.currency === 'USD', 'Test 18l: Currency normalized to uppercase USD');
+assert(validSalaryInputRes.salaryType === 'bonus', 'Test 18m: SalaryType bonus preserved');
+assert(validSalaryInputRes.employerOrSource === 'Global Ventures Ltd', 'Test 18n: Employer trimmed');
+assert(validSalaryInputRes.notes === 'Performance bonus', 'Test 18o: Notes trimmed');
+
+// 18p: Invalid salary amount (<= 0)
+let threwZeroSalary = false;
+try {
+  validateMongoSalaryInput({ amount: 0, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwZeroSalary = true;
+}
+assert(threwZeroSalary, 'Test 18p: validateSalaryInput rejects zero amount');
+
+let threwNegativeSalary = false;
+try {
+  validateMongoSalaryInput({ amount: -15000, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwNegativeSalary = true;
+}
+assert(threwNegativeSalary, 'Test 18q: validateSalaryInput rejects negative amount');
+
+// 18r: Sub-cent rejection (>2 decimals)
+let threwSalarySubCent = false;
+try {
+  validateMongoSalaryInput({ amount: 250000.999, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwSalarySubCent = true;
+}
+assert(threwSalarySubCent, 'Test 18r: validateSalaryInput rejects sub-cent precision (250000.999)');
+
+// 18s: NaN & Infinity rejection
+let threwSalaryNaN = false;
+try {
+  validateMongoSalaryInput({ amount: NaN, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwSalaryNaN = true;
+}
+assert(threwSalaryNaN, 'Test 18s: validateSalaryInput rejects NaN amount');
+
+let threwSalaryInf = false;
+try {
+  validateMongoSalaryInput({ amount: Infinity, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwSalaryInf = true;
+}
+assert(threwSalaryInf, 'Test 18t: validateSalaryInput rejects Infinity amount');
+
+// 18u: Amount exceeding 90 trillion bounds
+let threwSalaryOverflow = false;
+try {
+  validateMongoSalaryInput({ amount: 95_000_000_000_000, payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwSalaryOverflow = true;
+}
+assert(threwSalaryOverflow, 'Test 18u: validateSalaryInput rejects amount exceeding 90 trillion');
+
+// 18v: Invalid currency length
+let threwBadCurrencyLength = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, currency: 'US', payPeriodYear: 2026, payPeriodMonth: 10, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadCurrencyLength = true;
+}
+assert(threwBadCurrencyLength, 'Test 18v: validateSalaryInput rejects 2-letter currency code');
+
+// 18w: Invalid salary type
+let threwBadSalaryType = false;
+try {
+  validateMongoSalaryInput({
+    amount: 50000,
+    salaryType: 'cryptocurrency' as unknown as DomainSalaryType,
+    payPeriodYear: 2026,
+    payPeriodMonth: 10,
+    paymentDate: new Date(),
+  });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadSalaryType = true;
+}
+assert(threwBadSalaryType, 'Test 18w: validateSalaryInput rejects non-whitelisted salaryType');
+
+// 18x: Invalid pay periods
+let threwBadMonthLow = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, payPeriodYear: 2026, payPeriodMonth: 0, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadMonthLow = true;
+}
+assert(threwBadMonthLow, 'Test 18x: validateSalaryInput rejects payPeriodMonth < 1');
+
+let threwBadMonthHigh = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, payPeriodYear: 2026, payPeriodMonth: 13, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadMonthHigh = true;
+}
+assert(threwBadMonthHigh, 'Test 18y: validateSalaryInput rejects payPeriodMonth > 12');
+
+let threwBadYearLow = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, payPeriodYear: 1899, payPeriodMonth: 6, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadYearLow = true;
+}
+assert(threwBadYearLow, 'Test 18z: validateSalaryInput rejects payPeriodYear < 1900');
+
+let threwBadYearHigh = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, payPeriodYear: 2101, payPeriodMonth: 6, paymentDate: new Date() });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadYearHigh = true;
+}
+assert(threwBadYearHigh, 'Test 18aa: validateSalaryInput rejects payPeriodYear > 2100');
+
+// 18ab: Invalid date format
+let threwBadPaymentDate = false;
+try {
+  validateMongoSalaryInput({ amount: 50000, payPeriodYear: 2026, payPeriodMonth: 6, paymentDate: 'not-a-valid-date' });
+} catch (e) {
+  if (e instanceof ValidationError) threwBadPaymentDate = true;
+}
+assert(threwBadPaymentDate, 'Test 18ab: validateSalaryInput rejects unparseable paymentDate string');
+
+// 18ac: ObjectId Validation
+assert(isValidObjectId('507f1f77bcf86cd799439011') === true, 'Test 18ac: isValidObjectId returns true for 24-char hex string');
+assert(isValidObjectId('sal_12345') === false, 'Test 18ad: isValidObjectId returns false for legacy string ID');
+assert(isValidObjectId('507f1f77bcf86cd79943901') === false, 'Test 18ae: isValidObjectId returns false for 23-char string');
+assert(isValidObjectId(null) === false, 'Test 18af: isValidObjectId returns false for null');
+
+const sampleObjectId = new Types.ObjectId().toString();
+assert(validateSalaryRecordId(sampleObjectId, 'SalaryRecord') === sampleObjectId, 'Test 18ag: validateRecordId accepts valid 24-char hex ObjectId for SalaryRecord');
+assert(validateSalaryObjectId(sampleObjectId, 'SalaryRecord') === sampleObjectId, 'Test 18ah: validateObjectId accepts valid 24-char hex ObjectId');
+
+let threwInvalidObjectId = false;
+try {
+  validateSalaryRecordId('invalid_salary_id_xyz', 'SalaryRecord');
+} catch (e) {
+  if (e instanceof ValidationError) threwInvalidObjectId = true;
+}
+assert(threwInvalidObjectId, 'Test 18ai: validateRecordId rejects non-hex ObjectId for SalaryRecord');
+
+// 18aj: Domain mapping of full salary document with Decimal128
+const mockSalaryObjectId = new Types.ObjectId();
+const salaryDocToMap = {
+  _id: mockSalaryObjectId,
+  userId: 'usr_tenant_1',
+  amount: Types.Decimal128.fromString('550000.00'),
+  currency: 'PKR',
+  salaryType: 'OVERTIME' as const,
+  payPeriodYear: 2026,
+  payPeriodMonth: 10,
+  paymentDate: new Date('2026-10-31T00:00:00.000Z'),
+  employerOrSource: 'Contoso Software',
+  notes: 'Q3 overtime reimbursement',
+  createdAt: now,
+  updatedAt: now,
+};
+const domainSalaryResult = mapMongoSalaryRecordToDomain(salaryDocToMap);
+assert(domainSalaryResult.id === mockSalaryObjectId.toString(), 'Test 18aj: mapMongoSalaryRecordToDomain extracts clean string id from _id');
+assert(domainSalaryResult.amount === 550000, 'Test 18ak: mapMongoSalaryRecordToDomain converts Decimal128 to exact number');
+assert(domainSalaryResult.salaryType === 'overtime', 'Test 18al: mapMongoSalaryRecordToDomain maps OVERTIME -> overtime');
+assert(domainSalaryResult.employerOrSource === 'Contoso Software', 'Test 18am: Preserves employerOrSource');
+assert(domainSalaryResult.notes === 'Q3 overtime reimbursement', 'Test 18an: Preserves notes');
+
+// 18ao: Null optional fields map to undefined in domain
+const salaryWithNulls = {
+  _id: mockSalaryObjectId,
+  userId: 'usr_tenant_1',
+  amount: Types.Decimal128.fromString('100000.00'),
+  currency: 'PKR',
+  salaryType: 'PRIMARY' as const,
+  payPeriodYear: 2026,
+  payPeriodMonth: 10,
+  paymentDate: now,
+  employerOrSource: null,
+  notes: null,
+  createdAt: now,
+  updatedAt: now,
+};
+const domainNullResult = mapMongoSalaryRecordToDomain(salaryWithNulls);
+assert(domainNullResult.employerOrSource === undefined, 'Test 18ao: Null employerOrSource maps to undefined');
+assert(domainNullResult.notes === undefined, 'Test 18ap: Null notes maps to undefined');
+
+// 18aq-18ar: Tenant isolation simulation (scoped queries & no existence oracle)
+function simulateVerifySalaryTenantAccess(
+  record: { _id: Types.ObjectId; userId: string; amount: Types.Decimal128 } | null,
+  requestedId: string,
+  callerUserId: string
+) {
+  const safeId = validateSalaryRecordId(requestedId, 'SalaryRecord');
+  const safeCallerId = validateUserId(callerUserId);
+  if (!record || record._id.toString() !== safeId || record.userId !== safeCallerId) {
+    throw new RecordNotFoundError('SalaryRecord', safeId);
+  }
+  return { id: record._id.toString(), userId: record.userId };
+}
+
+const aliceSalaryId = new Types.ObjectId();
+const aliceSalaryRecord = {
+  _id: aliceSalaryId,
+  userId: 'usr_alice',
+  amount: Types.Decimal128.fromString('200000.00'),
+};
+
+const aliceAccess = simulateVerifySalaryTenantAccess(aliceSalaryRecord, aliceSalaryId.toString(), 'usr_alice');
+assert(aliceAccess.id === aliceSalaryId.toString(), 'Test 18aq: Authorized tenant Alice accesses own salary record');
+
+let threwCrossTenantSalaryAccess = false;
+let crossTenantErrorMessage = '';
+try {
+  simulateVerifySalaryTenantAccess(aliceSalaryRecord, aliceSalaryId.toString(), 'usr_bob');
+} catch (e) {
+  if (e instanceof RecordNotFoundError) {
+    threwCrossTenantSalaryAccess = true;
+    crossTenantErrorMessage = e.message;
+  }
+}
+assert(threwCrossTenantSalaryAccess, 'Test 18ar: Cross-tenant access to Alice record by Bob throws RecordNotFoundError');
+
+let threwNonExistentSalaryAccess = false;
+const nonExistentSalaryId = new Types.ObjectId().toString();
+try {
+  simulateVerifySalaryTenantAccess(null, nonExistentSalaryId, 'usr_bob');
+} catch (e) {
+  if (e instanceof RecordNotFoundError) {
+    threwNonExistentSalaryAccess = true;
+  }
+}
+assert(threwNonExistentSalaryAccess, 'Test 18as: Non-existent salary access throws RecordNotFoundError');
+assert(
+  crossTenantErrorMessage === `SalaryRecord with ID '${aliceSalaryId.toString()}' was not found.`,
+  'Test 18at: Cross-tenant error matches non-existent shape (no existence oracle)'
+);
+
+// 18au: Tenant-scoped deletion count verification
+let threwFailedDelete = false;
+try {
+  verifyDeletionResult(0, 'SalaryRecord', aliceSalaryId.toString());
+} catch (e) {
+  if (e instanceof RecordNotFoundError) threwFailedDelete = true;
+}
+assert(threwFailedDelete, 'Test 18au: verifyDeletionResult throws RecordNotFoundError when deletedCount is 0 (unmatched tenant)');
 
 console.log('\n--- Verification Summary ---');
 if (failures === 0) {

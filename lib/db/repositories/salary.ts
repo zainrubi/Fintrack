@@ -1,9 +1,14 @@
-import { prisma } from '../prisma';
+import mongoose, { Types } from 'mongoose';
 import {
-  domainSalaryTypeToDb,
-  mapSalaryRecordToDomain,
-  safeNumberToDecimal,
-} from '../mappers';
+  SalaryRecordModel,
+  type SalaryType as MongoSalaryType,
+} from '../models/salary-record';
+import { connectToDatabase } from '../mongoose';
+import { MAX_SAFE_CURRENCY_AMOUNT, numberToDecimal128 } from '../decimal';
+import {
+  domainSalaryTypeToMongo,
+  mapMongoSalaryRecordToDomain,
+} from '../mongo-mappers';
 import { RecordNotFoundError, ValidationError } from './errors';
 import {
   buildPaginationMeta,
@@ -16,7 +21,6 @@ import type {
   SalaryRecord as DomainSalaryRecord,
   SalaryType as DomainSalaryType,
 } from '@/types/financial';
-import { Prisma } from '@prisma/client';
 
 // ==============================================================================
 // 1. Input Contracts
@@ -63,11 +67,50 @@ export function validateUserId(userId: unknown): string {
   return userId.trim();
 }
 
+/**
+ * Validates whether a value is a 24-character hexadecimal MongoDB ObjectId string.
+ */
+export function isValidObjectId(id: unknown): id is string {
+  if (typeof id !== 'string') return false;
+  const trimmed = id.trim();
+  return /^[0-9a-fA-F]{24}$/.test(trimmed) && Types.ObjectId.isValid(trimmed);
+}
+
+/**
+ * Validates that an ID is a valid string. For SalaryRecord entity, strictly enforces
+ * a 24-character hexadecimal MongoDB ObjectId.
+ */
 export function validateRecordId(id: unknown, entityName: string = 'Record'): string {
   if (typeof id !== 'string' || id.trim() === '') {
     throw new ValidationError(`A valid, non-empty ${entityName} ID is required.`, 'id', id);
   }
-  return id.trim();
+  const trimmed = id.trim();
+  if (entityName === 'SalaryRecord' && !isValidObjectId(trimmed)) {
+    throw new ValidationError(
+      `Invalid SalaryRecord ID '${trimmed}'. Must be a 24-character hexadecimal ObjectId.`,
+      'id',
+      id
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Validates that an ID is a valid 24-character hexadecimal MongoDB ObjectId.
+ */
+export function validateObjectId(id: unknown, entityName: string = 'Record'): string {
+  if (typeof id !== 'string' || id.trim() === '') {
+    throw new ValidationError(`A valid, non-empty ${entityName} ID is required.`, 'id', id);
+  }
+  const trimmed = id.trim();
+  if (!isValidObjectId(trimmed)) {
+    throw new ValidationError(
+      `Invalid ${entityName} ID '${trimmed}'. Must be a 24-character hexadecimal ObjectId.`,
+      'id',
+      id
+    );
+  }
+  return trimmed;
 }
 
 function parseAndValidateDate(value: Date | string, fieldName: string): Date {
@@ -79,7 +122,7 @@ function parseAndValidateDate(value: Date | string, fieldName: string): Date {
 }
 
 export function validateSalaryInput(input: CreateSalaryInput): {
-  amountDecimal: Prisma.Decimal;
+  amountDecimal: Types.Decimal128;
   currency: string;
   salaryType: DomainSalaryType;
   payPeriodYear: number;
@@ -95,7 +138,34 @@ export function validateSalaryInput(input: CreateSalaryInput): {
   if (input.amount <= 0) {
     throw new ValidationError('Salary amount must be greater than zero.', 'amount', input.amount);
   }
-  const amountDecimal = safeNumberToDecimal(input.amount, 'amount');
+  if (Math.abs(input.amount) > MAX_SAFE_CURRENCY_AMOUNT) {
+    throw new ValidationError(
+      `Salary amount '${input.amount}' exceeds the maximum safe representation limit (90 trillion).`,
+      'amount',
+      input.amount
+    );
+  }
+
+  // Guard against sub-cent precision: reject >2 decimal places
+  const str = input.amount.toString();
+  if (str.includes('.')) {
+    const fraction = str.split('.')[1];
+    if (fraction && fraction.length > 2 && Math.abs(Math.round(input.amount * 100) - input.amount * 100) > 1e-6) {
+      throw new ValidationError(
+        `Salary amount '${input.amount}' cannot have fractional sub-cent precision (>2 decimal places).`,
+        'amount',
+        input.amount
+      );
+    }
+  }
+
+  let amountDecimal: Types.Decimal128;
+  try {
+    amountDecimal = numberToDecimal128(input.amount, 'amount');
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ValidationError(message, 'amount', input.amount);
+  }
 
   // 2. Currency validation
   let currency = 'PKR';
@@ -163,6 +233,13 @@ export function validateSalaryInput(input: CreateSalaryInput): {
   };
 }
 
+async function ensureDbConnected(): Promise<void> {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+  await connectToDatabase();
+}
+
 // ==============================================================================
 // 3. Repository Implementation
 // ==============================================================================
@@ -177,21 +254,21 @@ export async function createSalary(
   const safeUserId = validateUserId(userId);
   const validated = validateSalaryInput(input);
 
-  const created = await prisma.salaryRecord.create({
-    data: {
-      userId: safeUserId,
-      amount: validated.amountDecimal,
-      currency: validated.currency,
-      salaryType: domainSalaryTypeToDb(validated.salaryType),
-      payPeriodYear: validated.payPeriodYear,
-      payPeriodMonth: validated.payPeriodMonth,
-      paymentDate: validated.paymentDate,
-      employerOrSource: validated.employerOrSource,
-      notes: validated.notes,
-    },
+  await ensureDbConnected();
+
+  const created = await SalaryRecordModel.create({
+    userId: safeUserId,
+    amount: validated.amountDecimal,
+    currency: validated.currency,
+    salaryType: domainSalaryTypeToMongo(validated.salaryType),
+    payPeriodYear: validated.payPeriodYear,
+    payPeriodMonth: validated.payPeriodMonth,
+    paymentDate: validated.paymentDate,
+    employerOrSource: validated.employerOrSource,
+    notes: validated.notes,
   });
 
-  return mapSalaryRecordToDomain(created);
+  return mapMongoSalaryRecordToDomain(created);
 }
 
 /**
@@ -205,45 +282,75 @@ export async function listSalaries(
   const safeUserId = validateUserId(userId);
   const { page, limit, skip } = normalizePagination(pagination);
 
-  const where: Prisma.SalaryRecordWhereInput = {
+  await ensureDbConnected();
+
+  const query: Record<string, unknown> = {
     userId: safeUserId,
   };
 
   if (filter?.payPeriodYear !== undefined) {
-    where.payPeriodYear = filter.payPeriodYear;
+    if (!Number.isInteger(filter.payPeriodYear) || filter.payPeriodYear < 1900 || filter.payPeriodYear > 2100) {
+      throw new ValidationError(
+        'filter.payPeriodYear must be an integer between 1900 and 2100.',
+        'payPeriodYear',
+        filter.payPeriodYear
+      );
+    }
+    query.payPeriodYear = filter.payPeriodYear;
   }
+
   if (filter?.payPeriodMonth !== undefined) {
-    where.payPeriodMonth = filter.payPeriodMonth;
+    if (!Number.isInteger(filter.payPeriodMonth) || filter.payPeriodMonth < 1 || filter.payPeriodMonth > 12) {
+      throw new ValidationError(
+        'filter.payPeriodMonth must be an integer between 1 and 12.',
+        'payPeriodMonth',
+        filter.payPeriodMonth
+      );
+    }
+    query.payPeriodMonth = filter.payPeriodMonth;
   }
+
   if (filter?.salaryType !== undefined) {
-    where.salaryType = domainSalaryTypeToDb(filter.salaryType);
+    const validTypes: DomainSalaryType[] = [
+      'primary',
+      'secondary',
+      'bonus',
+      'allowance',
+      'freelance',
+      'overtime',
+      'other',
+    ];
+    if (!validTypes.includes(filter.salaryType)) {
+      throw new ValidationError(
+        `Invalid salaryType '${filter.salaryType}'. Permitted types: ${validTypes.join(', ')}`,
+        'salaryType',
+        filter.salaryType
+      );
+    }
+    query.salaryType = domainSalaryTypeToMongo(filter.salaryType);
   }
+
   if (filter?.startDate || filter?.endDate) {
-    where.paymentDate = {};
+    const paymentDateFilter: Record<string, Date> = {};
     if (filter.startDate) {
-      where.paymentDate.gte = parseAndValidateDate(filter.startDate, 'filter.startDate');
+      paymentDateFilter.$gte = parseAndValidateDate(filter.startDate, 'filter.startDate');
     }
     if (filter.endDate) {
-      where.paymentDate.lte = parseAndValidateDate(filter.endDate, 'filter.endDate');
+      paymentDateFilter.$lte = parseAndValidateDate(filter.endDate, 'filter.endDate');
     }
+    query.paymentDate = paymentDateFilter;
   }
 
   const [totalCount, dbRecords] = await Promise.all([
-    prisma.salaryRecord.count({ where }),
-    prisma.salaryRecord.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [
-        { paymentDate: 'desc' },
-        { createdAt: 'desc' },
-        { id: 'desc' },
-      ],
-    }),
+    SalaryRecordModel.countDocuments(query),
+    SalaryRecordModel.find(query)
+      .sort({ paymentDate: -1, createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit),
   ]);
 
   return {
-    data: dbRecords.map(mapSalaryRecordToDomain),
+    data: dbRecords.map(mapMongoSalaryRecordToDomain),
     pagination: buildPaginationMeta(totalCount, page, limit),
   };
 }
@@ -258,18 +365,18 @@ export async function getSalaryById(
   const safeUserId = validateUserId(userId);
   const safeId = validateRecordId(id, 'SalaryRecord');
 
-  const record = await prisma.salaryRecord.findFirst({
-    where: {
-      id: safeId,
-      userId: safeUserId,
-    },
+  await ensureDbConnected();
+
+  const record = await SalaryRecordModel.findOne({
+    _id: new Types.ObjectId(safeId),
+    userId: safeUserId,
   });
 
   if (!record) {
     throw new RecordNotFoundError('SalaryRecord', safeId);
   }
 
-  return mapSalaryRecordToDomain(record);
+  return mapMongoSalaryRecordToDomain(record);
 }
 
 /**
@@ -284,26 +391,46 @@ export async function updateSalary(
   const safeUserId = validateUserId(userId);
   const safeId = validateRecordId(id, 'SalaryRecord');
 
-  // Verify ownership before modifying
-  const existing = await prisma.salaryRecord.findFirst({
-    where: {
-      id: safeId,
-      userId: safeUserId,
-    },
-    select: { id: true },
-  });
+  await ensureDbConnected();
 
-  if (!existing) {
-    throw new RecordNotFoundError('SalaryRecord', safeId);
-  }
-
-  const updateData: Prisma.SalaryRecordUpdateInput = {};
+  const updateData: Partial<{
+    amount: Types.Decimal128;
+    currency: string;
+    salaryType: MongoSalaryType;
+    payPeriodYear: number;
+    payPeriodMonth: number;
+    paymentDate: Date;
+    employerOrSource: string | null;
+    notes: string | null;
+  }> = {};
 
   if (input.amount !== undefined) {
-    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
+    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
+      throw new ValidationError('Updated amount must be a finite numeric value.', 'amount', input.amount);
+    }
+    if (input.amount <= 0) {
       throw new ValidationError('Updated amount must be a positive finite number.', 'amount', input.amount);
     }
-    updateData.amount = safeNumberToDecimal(input.amount, 'amount');
+    if (Math.abs(input.amount) > MAX_SAFE_CURRENCY_AMOUNT) {
+      throw new ValidationError(
+        `Updated amount '${input.amount}' exceeds the maximum safe representation limit (90 trillion).`,
+        'amount',
+        input.amount
+      );
+    }
+    const str = input.amount.toString();
+    if (str.includes('.')) {
+      const fraction = str.split('.')[1];
+      if (fraction && fraction.length > 2 && Math.abs(Math.round(input.amount * 100) - input.amount * 100) > 1e-6) {
+        throw new ValidationError('Updated amount cannot have fractional sub-cent precision (>2 decimal places).', 'amount', input.amount);
+      }
+    }
+    try {
+      updateData.amount = numberToDecimal128(input.amount, 'amount');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ValidationError(message, 'amount', input.amount);
+    }
   }
 
   if (input.currency !== undefined) {
@@ -315,7 +442,23 @@ export async function updateSalary(
   }
 
   if (input.salaryType !== undefined) {
-    updateData.salaryType = domainSalaryTypeToDb(input.salaryType);
+    const validTypes: DomainSalaryType[] = [
+      'primary',
+      'secondary',
+      'bonus',
+      'allowance',
+      'freelance',
+      'overtime',
+      'other',
+    ];
+    if (!validTypes.includes(input.salaryType)) {
+      throw new ValidationError(
+        `Invalid salaryType '${input.salaryType}'. Permitted types: ${validTypes.join(', ')}`,
+        'salaryType',
+        input.salaryType
+      );
+    }
+    updateData.salaryType = domainSalaryTypeToMongo(input.salaryType);
   }
 
   if (input.payPeriodMonth !== undefined) {
@@ -346,18 +489,24 @@ export async function updateSalary(
     updateData.notes = input.notes ? input.notes.trim() : null;
   }
 
-  const updated = await prisma.salaryRecord.update({
-    where: { id: safeId },
-    data: updateData,
-  });
+  const updated = await SalaryRecordModel.findOneAndUpdate(
+    {
+      _id: new Types.ObjectId(safeId),
+      userId: safeUserId,
+    },
+    { $set: updateData },
+    { new: true, runValidators: true }
+  );
 
-  return mapSalaryRecordToDomain(updated);
+  if (!updated) {
+    throw new RecordNotFoundError('SalaryRecord', safeId);
+  }
+
+  return mapMongoSalaryRecordToDomain(updated);
 }
 
 /**
  * Deletes a salary record, atomically scoped by both record ID and user ID.
- * Uses deleteMany to execute a single atomic SQL statement:
- * DELETE FROM salary_records WHERE id = ? AND user_id = ?
  */
 export async function deleteSalary(
   userId: string,
@@ -366,12 +515,12 @@ export async function deleteSalary(
   const safeUserId = validateUserId(userId);
   const safeId = validateRecordId(id, 'SalaryRecord');
 
-  const result = await prisma.salaryRecord.deleteMany({
-    where: {
-      id: safeId,
-      userId: safeUserId,
-    },
+  await ensureDbConnected();
+
+  const result = await SalaryRecordModel.deleteOne({
+    _id: new Types.ObjectId(safeId),
+    userId: safeUserId,
   });
 
-  verifyDeletionResult(result.count, 'SalaryRecord', safeId);
+  verifyDeletionResult(result.deletedCount, 'SalaryRecord', safeId);
 }

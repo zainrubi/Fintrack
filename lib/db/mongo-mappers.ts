@@ -21,6 +21,7 @@ import type {
   InsuranceFrequency as MongoInsuranceFrequency,
   LoanFrequency as MongoLoanFrequency,
 } from './models';
+import { Types } from 'mongoose';
 import {
   decimal128ToSafeNumber,
   optionalDecimal128ToSafeNumber,
@@ -426,10 +427,28 @@ function extractId(doc: { id?: unknown; _id?: unknown }): string {
 // 2. Mongoose Document -> Domain Type Mappers
 // ==============================================================================
 
+export type SalaryRecordMongoDoc =
+  | ISalaryRecord
+  | {
+      _id?: unknown;
+      id?: unknown;
+      userId: string;
+      amount: Types.Decimal128 | number | string;
+      currency: string;
+      salaryType: MongoSalaryType;
+      payPeriodMonth: number;
+      payPeriodYear: number;
+      paymentDate: Date | string;
+      employerOrSource?: string | null;
+      notes?: string | null;
+      createdAt: Date | string;
+      updatedAt: Date | string;
+    };
+
 /**
- * Maps a Mongoose SalaryRecord document to the domain SalaryRecord.
+ * Maps a Mongoose SalaryRecord document or plain object to the domain SalaryRecord.
  */
-export function mapMongoSalaryRecordToDomain(doc: ISalaryRecord): DomainSalaryRecord {
+export function mapMongoSalaryRecordToDomain(doc: SalaryRecordMongoDoc): DomainSalaryRecord {
   return {
     id: extractId(doc),
     userId: doc.userId,
@@ -438,11 +457,11 @@ export function mapMongoSalaryRecordToDomain(doc: ISalaryRecord): DomainSalaryRe
     salaryType: mongoSalaryTypeToDomain(doc.salaryType),
     payPeriodMonth: doc.payPeriodMonth,
     payPeriodYear: doc.payPeriodYear,
-    paymentDate: doc.paymentDate,
+    paymentDate: doc.paymentDate instanceof Date ? doc.paymentDate : new Date(doc.paymentDate),
     employerOrSource: doc.employerOrSource ?? undefined,
     notes: doc.notes ?? undefined,
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
+    createdAt: doc.createdAt instanceof Date ? doc.createdAt : new Date(doc.createdAt),
+    updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : new Date(doc.updatedAt),
   };
 }
 
