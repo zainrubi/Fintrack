@@ -3,8 +3,8 @@
 **Project:** Fintrack (Personal Salary & Wealth Management Web Application)  
 **Engineering & Product Council:** Senior Product Engineer, Software Architect, Business Analyst, UI/UX Designer, Database Architect, QA Engineer, Security Engineer, DevOps Engineer, Technical Project Manager  
 **Phase:** Phase 1 — Project Discovery & Requirements  
-**Status:** **PHASE 1 STATUS: BLOCKED** (Pending Resolution of Financial Domain Rules & Period Attribution)  
-**Document Version:** 1.1.0 (Audited Baseline — Gate Blocked)  
+**Status:** **PHASE 1 STATUS: COMPLETE** (Approved Baseline — Financial Period Model)  
+**Document Version:** 2.0.0 (Canonical Baseline — Phase 1 Complete)  
 **Date:** October 2026  
 
 ---
@@ -59,27 +59,76 @@ Fintrack empowers the user to manually record and understand their salary, expen
 
 ## 3. Product Scope & MVP Definition
 
-### 3.1 Core Domain Terminology & Accounting Concepts
-To prevent ambiguity, Fintrack maintains strict boundaries between five foundational financial concepts:
+### 3.1 The Financial Period Model & Core Domain Terminology
+To prevent ambiguity and eliminate accounting drift, Fintrack establishes the **Financial Period** as the foundational architectural boundary of the personal financial lifecycle. Fintrack is a manually maintained ledger and planning tool, **NOT** a banking application. The user manually records financial information and explicitly determines which financial month that information belongs to.
 
-1. **Recorded Salary / Income:** The user-stated numerical compensation received for a given pay period, logged manually as a historical entry without bank-feed verification.
-2. **Actual Recorded Expenses:** User-logged out-of-pocket cash outflows categorized as Fixed (rent, tuition, utilities) or Variable (groceries, dining, entertainment) that have actually been spent.
-3. **Actual Recorded Savings:** Specific manual deposits or transfers logged into dedicated reserve buckets/goals (e.g., Emergency Fund). Distinct from general unspent cash.
-4. **Planned Budget Allocations:** Forward-looking intentions assigning currency envelopes to specific expense or savings categories for the pay period. **Planned allocations are NOT actual spending and NOT actual savings.**
-5. **Unallocated or Remaining Recorded Amount:**
-   - *Unallocated Budget Pool:* `Recorded Net Salary - Total Planned Allocations`. In Zero-Based Budgeting, this is purely a forward-looking planning state; the user's objective is to allocate every rupee of recorded salary across category envelopes so this reaches zero. It does NOT represent cash movement.
-   - *Recorded Salary Remaining (Estimate):* `Recorded Net Salary - (Actual Recorded Expenses + Actual Recorded Savings Contributions)`. This reflects a mathematical estimate of how much of the manually recorded salary has not yet been logged as expenses or savings for the selected period. It is **NOT** verified bank cash, liquid account balance, or guaranteed "available to spend." Stored salary records are never altered or decremented when expenses, savings, or investments are entered.
+#### Foundational Concepts:
+1. **Financial Period (The Core Monthly Boundary):**
+   - A Financial Period represents one user-selected calendar month (e.g., October 2026, November 2026, December 2026).
+   - Each Financial Period is an independent, isolated monthly financial record.
+   - The user must explicitly select the calendar month when recording salary, which creates and activates that user's Financial Period.
+   - The system must **NOT** infer or guess the Financial Period from the salary payment date, entry date, or transaction timestamps. The user-selected Financial Period is strictly authoritative.
+   - Every Financial Period is isolated: modifying records in one period (e.g., October 2026) never mutates another period (e.g., November 2026). Users can return to older periods to edit records; updating an older period recalculates that period's metrics and cross-period historical analytics from raw records.
+
+2. **Sequential Record Gating (Salary Prerequisite):**
+   - In Fintrack's MVP, a user must have an active Financial Period before any normal monthly financial records can be created.
+   - Enforced Sequence: **Financial Period → Recorded Salary → Expenses / Savings**.
+   - A user selects a month, records the salary for that month, and activates the period. Expenses and savings can then be added specifically to that active period.
+   - The normal UI prevents monthly expense and savings entry when no Financial Period with a recorded salary exists for that month. (This removes previous ambiguity regarding "missing salary but existing expenses").
+
+3. **Recorded Salary / Inflow (One Primary Salary in MVP):**
+   - For MVP requirements, each Financial Period contains exactly **one primary recorded monthly salary**.
+   - Stored as a manually entered numerical value for the user-selected Financial Period without bank-feed verification.
+   - Stored salary records are never modified, decremented, or gated by verification states (no Pending/Received state machine in MVP).
+
+4. **Actual Recorded Expenses:**
+   - User-logged out-of-pocket expenditures categorized as Fixed (rent, tuition, utilities) or Variable (groceries, dining, entertainment) that belong strictly to an active Financial Period.
+   - Transaction dates provide chronological ordering within the period but do not override the user-selected Financial Period.
+
+5. **Actual Recorded Savings:**
+   - Specific manual contributions logged into dedicated reserve goals (e.g., Emergency Fund) belonging to an active Financial Period.
+   - Increments goal balance and monthly savings rate without being counted as an expense.
+
+6. **Planned Budget Allocations (Zero-Based Budgeting):**
+   - Forward-looking intentions assigning planned currency envelopes to specific categories for the Financial Period.
+   - **Planned allocations are NOT actual spending and NOT actual savings.**
+   - *Unallocated Budget Pool:* `Recorded Net Salary - Total Planned Allocations`. In Zero-Based Budgeting, this is purely a forward-looking planning state; the user's objective is to allocate every rupee of recorded salary across envelopes so this equals zero (`Income - Allocations = 0`). It does not represent cash movement.
+
+7. **Recorded Salary Remaining (Estimate) & Excess Outflow Rule:**
+   - *Formula:* `Recorded Net Salary - (Actual Recorded Expenses + Actual Recorded Savings Contributions)`.
+   - Mathematical estimate of how much of the manually recorded salary has not yet been logged as expenses or savings for the selected Financial Period. It is **NOT** verified bank cash, liquid account balance, or guaranteed "available to spend." Stored salary records are never altered or decremented.
+   - *Excess Outflow Presentation Rule:* When `Actual Expenses + Actual Savings > Recorded Salary`:
+     - The underlying signed calculation (`Salary - Outflows < 0`) is preserved internally for arithmetic correctness and ratio calculations.
+     - The primary user-facing Remaining display shows zero: **`Recorded Salary Remaining (Estimate): PKR 0`** (or base currency equivalent) to prevent communicating a misleading negative spendable amount.
+     - An explicit visual warning exposes the exact excess outflow: **`Your recorded expenses and savings exceed this period's recorded salary by [Currency] [Amount].`**
+
+#### 3.1.1 Mandated Financial Terminology Guide
+To preserve domain integrity across all documentation, UI components, and calculation modules, the following terminology standards are strictly enforced:
+
+| Strictly Preferred Terminology | Strictly Prohibited / Avoided Terminology | Architectural Rationale |
+| :--- | :--- | :--- |
+| **Financial Period** | Payday cycle, billing cycle | User-selected calendar month is the authoritative ledger boundary. |
+| **Selected Financial Period** | Active bank cycle, current month | Explicit user context; system does not infer from system clock. |
+| **Recorded Salary** | Salary Received, Verified Deposit | Manual user entry; system never verifies banking transactions. |
+| **Actual Expenses** | Cash Spent, Money Out | Actual ledger entries distinguishing out-of-pocket spending from planned caps. |
+| **Actual Savings / Goal Contribution** | Savings Deposit, Bank Transfer | Manual goal contributions; distinct from general unspent money. |
+| **Recorded Salary Remaining (Estimate)** | Bank Balance, Available Cash, Spendable Cash | Calculated remainder is an estimate, not verified liquid cash. |
+| **Unallocated Budget Pool** | Unallocated Cash Pool, Free Cash | Forward-looking planning state in Zero-Based Budgeting. |
+| **Historical Financial Periods / Range** | Historical statement, bank history | Isolated monthly records aggregated across reporting ranges. |
 
 ### 3.2 MVP Scope (In Scope)
+- **Financial Period Management:** User-selected calendar month boundary (e.g., October 2026); explicit selection is authoritative.
+- **Sequential Monthly Gating:** Normal UI requires recording salary to activate a Financial Period before expenses or savings can be entered.
+- **Single Primary Salary per Period:** One primary recorded monthly salary per Financial Period for MVP.
 - **User Authentication:** Email/password authentication using Auth.js (self-managed credentials and session cookies).
-- **User Financial Profile:** Default currency selection (PKR default), monthly income target, emergency fund target months.
-- **Salary Management:** Manual recording of salary inflow by pay period (month/year), payment date, source, and salary type (primary, bonus, freelance).
-- **Expense Tracking:** Manual logging of expenditures with strict classification into **Fixed** or **Variable**, categorized across 14 pre-seeded categories.
-- **Zero-Based Budget Allocation:** Setting planned category envelopes against recorded monthly salary and monitoring budget vs. actual consumption.
-- **Savings Goals & Emergency Reserve:** Dedicated emergency fund tracking and goal contribution logging (ensuring savings are not double-counted as expenses).
-- **Executive Financial Dashboard:** Dynamic aggregation displaying Recorded Net Salary, Fixed vs. Variable Expenses, Total Savings, Recorded Salary Remaining (Estimate), Savings Rate (%), and Expense Ratio (%).
-- **Active Period Switcher:** Simple calendar navigation between historical and current pay periods.
-- **Responsive Application Shell:** Clean, responsive desktop sidebar and mobile navigation drawer.
+- **User Financial Profile:** Default currency selection (PKR default; non-blocking optional income and emergency fund targets).
+- **Expense Tracking:** Manual logging of expenditures with binary classification into **Fixed** or **Variable**, categorized across 14 pre-seeded categories.
+- **Zero-Based Budget Allocation:** Setting planned category envelopes against recorded monthly salary and monitoring envelope burn.
+- **Savings Goals & Emergency Reserve:** Dedicated emergency fund tracking and goal contribution logging (non-expense accounting).
+- **Selected-Period Executive Dashboard:** Displays authoritative context (e.g. `Financial Period: October 2026`), Recorded Salary, Fixed vs. Variable Expenses, Total Savings, Recorded Salary Remaining (Estimate) (with zero-display and excess warning if outflows exceed salary), Savings Rate (%), and Expense Ratio (%).
+- **Cross-Period Historical Analytics:** Aggregate reporting across predefined reporting ranges (**Last 3 Months, Last 6 Months, Last 12 Months / 1 Year, All Time**) for core MVP metrics: Total Recorded Salary, Total Expenses, Total Savings, Average Monthly Salary, Average Monthly Expenses, Average Monthly Savings, and Aggregate Savings Rate (`Total Savings ÷ Total Recorded Salary × 100`).
+- **Independent Period Navigation & Editing:** Ability to switch between periods and edit older records without mutating neighboring months.
+- **Responsive Application Shell:** Responsive desktop sidebar, top header with period switcher, and mobile navigation drawer.
 
 ### 3.3 Explicit Exclusions from MVP (Out of Scope)
 - **No Bank Account Tracking:** No HBL, Meezan, checking, or cash accounts. No account balances or bank statement linking.
@@ -88,13 +137,14 @@ To prevent ambiguity, Fintrack maintains strict boundaries between five foundati
 - **No Multi-Currency Mixing per User:** A user operates in a single chosen base currency per profile.
 - **No Split-Transactions:** Transactions cannot be split across multiple categories in MVP.
 - **Post-MVP Modules:** Loans & EMI tracking, Insurance policies, Investment portfolios, and CSV data export are deferred to Post-MVP.
+- **Advanced Historical Visualizations:** Multi-variable trend line charts, predictive anomaly detection, and automated category burn simulators are deferred to Post-MVP.
 
 ### 3.4 Future Scope (Post-MVP & Long Term)
 - **Post-MVP Phase A:** Loan & EMI commitment tracking with interest/principal amortization breakdown.
 - **Post-MVP Phase B:** Insurance policy registry and annual premium burden tracking.
 - **Post-MVP Phase C:** Investment asset registry and capital deployed tracking.
-- **Post-MVP Phase D:** Historical reporting (6-to-12 month trends) and CSV ledger export.
-- **Future Intelligence:** Spending anomaly alerts, predictive cash-flow simulators, and optional read-only CSV statement import.
+- **Post-MVP Phase D:** Advanced trend analytics (multi-month graphical comparisons, highest/lowest expense month detection, category shift analysis) and CSV ledger export.
+- **Future Enhancements:** Multiple salary streams per period (secondary income, bonuses, freelance contracts), spending anomaly alerts, and optional statement import.
 
 ---
 
@@ -110,32 +160,33 @@ To prevent ambiguity, Fintrack maintains strict boundaries between five foundati
 | **REQ-PROF-01** | Financial Profile Initialization | Must Have | MVP | REQ-AUTH-01 | Onboarding requires base currency selection (PKR default) and provides optional proposed defaults for target monthly income and emergency fund target cushion (default: 6 months; non-blocking). |
 | **REQ-PROF-02** | Currency Formatting Settings | Should Have | MVP | REQ-PROF-01 | Numbers render with localized symbols and appropriate decimal precision (0 decimals for PKR, 2 for USD/EUR). |
 
-### Module 2: Salary & Income Management (SAL)
+### Module 2: Salary & Financial Period Management (SAL)
 
 | Req ID | Requirement Description | Priority | Target | Dependencies | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **REQ-SAL-01** | Record Monthly Salary Inflow | Must Have | MVP | REQ-PROF-01 | Form to manually log amount, pay period (month & year), payment date, employer/source, and notes. Positive amount with exact 2 decimals. |
-| **REQ-SAL-02** | Income Stream Classification | Must Have | MVP | REQ-SAL-01 | Supports `primary`, `secondary`, `bonus`, `allowance`, `freelance`, `other`. Defaults to `primary`. |
-| **REQ-SAL-03** | Salary Record Modification | Must Have | MVP | REQ-SAL-01 | User can edit or delete an existing salary entry; recalculates affected period totals immediately. |
-| **REQ-SAL-04** | Historical Salary Ledger | Must Have | MVP | REQ-SAL-01 | Paginated list (default 20 records) sorted descending by payment date. |
+| **REQ-SAL-01** | Record Primary Salary & Activate Financial Period | Must Have | MVP | REQ-PROF-01 | Form to manually log amount, explicitly selected calendar month (`periodYear`, `periodMonth`), payment date, employer/source, and notes. Positive amount with exact 2 decimals. Explicit selection creates/activates the Financial Period; system never infers period from payment date. |
+| **REQ-SAL-02** | Single Primary Salary Rule | Must Have | MVP | REQ-SAL-01 | MVP enforces one primary recorded monthly salary per Financial Period. Additional income streams (`bonus`, `freelance`, `secondary`) are recorded as a future enhancement / open decision. |
+| **REQ-SAL-03** | Financial Period Salary Modification | Must Have | MVP | REQ-SAL-01 | User can edit or delete an existing salary entry; recalculates affected period totals and cross-period aggregates immediately without mutating other periods. |
+| **REQ-SAL-04** | Historical Salary Ledger | Must Have | MVP | REQ-SAL-01 | Paginated list (default 20 records) sorted descending by Financial Period (`periodYear`, `periodMonth`). |
+| **REQ-SAL-05** | Sequential Monthly Record Gating | Must Have | MVP | REQ-SAL-01 | A user must have an active Financial Period with a recorded salary before monthly expenses or savings can be entered. The normal UI strictly blocks adding outflows to periods without recorded salary. |
 
 ### Module 3: Expense Management (EXP)
 
 | Req ID | Requirement Description | Priority | Target | Dependencies | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **REQ-EXP-01** | Log Expense Record | Must Have | MVP | REQ-PROF-01 | Fields: amount, date, category, expense type (fixed vs variable), description, notes. Rejects zero, negative, or sub-cent amounts. |
+| **REQ-EXP-01** | Log Expense Record in Active Period | Must Have | MVP | REQ-SAL-05 | Fields: amount, date, category, expense type (fixed vs variable), description, notes. Rejects zero, negative, or sub-cent amounts. Associates expense strictly with the active Financial Period; normal UI prevents logging to unactivated periods. |
 | **REQ-EXP-02** | Fixed vs. Variable Tagging | Must Have | MVP | REQ-EXP-01 | Enforces binary classification: Fixed (rent, utilities) vs. Variable (groceries, leisure); computes separate totals on dashboard. |
 | **REQ-EXP-03** | Default Salaried Categories | Must Have | MVP | REQ-EXP-01 | 14 pre-seeded categories tailored to salaried lifestyles (Housing, Utilities, Groceries, Healthcare, Tuition, etc.). |
 | **REQ-EXP-04** | Custom Expense Categories | Should Have | Post-MVP | REQ-EXP-03 | User can create custom categories with custom icons and fixed/variable defaults. |
-| **REQ-EXP-05** | Expense Ledger & Filtering | Must Have | MVP | REQ-EXP-01 | Paginated list with filtering by month, year, category, and expense type. |
+| **REQ-EXP-05** | Expense Ledger & Filtering | Must Have | MVP | REQ-EXP-01 | Paginated list with filtering by Financial Period, category, and expense type. |
 | **REQ-EXP-06** | Expense Edit & Deletion | Must Have | MVP | REQ-EXP-01 | Full CRUD; editing/deleting expense atomically recalculates Recorded Salary Remaining (Estimate) and category totals. Stored salary records remain unchanged. |
 
 ### Module 4: Zero-Based Budgeting & Allocation (BUD)
 
 | Req ID | Requirement Description | Priority | Target | Dependencies | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **REQ-BUD-01** | Monthly Envelope Allocation | Must Have | MVP | REQ-SAL-01 | User assigns planned spending caps to categories for a specific pay period. Planned allocations do not count as actual spending. |
-| **REQ-BUD-02** | Unallocated Salary Pool | Must Have | MVP | REQ-SAL-01, BUD-01 | Displays `Recorded Salary - Total Planned Allocations`. Visual indicator shows when unallocated pool equals exactly zero. |
+| **REQ-BUD-01** | Monthly Envelope Allocation | Must Have | MVP | REQ-SAL-01 | User assigns planned spending caps to categories for a specific Financial Period. Planned allocations do not count as actual spending. |
+| **REQ-BUD-02** | Unallocated Budget Pool | Must Have | MVP | REQ-SAL-01, BUD-01 | Displays `Recorded Salary - Total Planned Allocations`. Visual indicator shows when unallocated budget pool equals exactly zero (`Income - Allocations = 0`). |
 | **REQ-BUD-03** | Budget vs. Actual Variance | Must Have | MVP | REQ-EXP-01, BUD-01 | Category progress bars indicate % of planned envelope consumed by actual recorded expenses; highlights over-budget envelopes. |
 
 ### Module 5: Savings Goals & Emergency Reserves (SAV)
@@ -144,17 +195,20 @@ To prevent ambiguity, Fintrack maintains strict boundaries between five foundati
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **REQ-SAV-01** | Create Savings Goal | Must Have | MVP | REQ-PROF-01 | Fields: name, category (Emergency, Retirement, Down Payment, etc.), target amount, target date. |
 | **REQ-SAV-02** | Dedicated Emergency Fund | Must Have | MVP | REQ-SAV-01 | Dedicated flag `isEmergencyFund`; tracks target months of living expenses based on monthly fixed costs. |
-| **REQ-SAV-03** | Record Savings Contribution | Must Have | MVP | REQ-SAV-01 | User manually logs cash deposited into a goal; increments goal balance without being counted as an expense. |
+| **REQ-SAV-03** | Record Savings Contribution | Must Have | MVP | REQ-SAL-05, SAV-01 | User manually logs contribution into a goal; associates entry with the active Financial Period; increments goal balance without being counted as an expense. Blocked if period has no recorded salary. |
 | **REQ-SAV-04** | Goal Progress Visualization | Must Have | MVP | REQ-SAV-03 | Displays target vs. accumulated balance, percentage progress bar, and remaining target amount. |
 
 ### Module 6: Executive Dashboard & Analytics (DASH / REP)
 
 | Req ID | Requirement Description | Priority | Target | Dependencies | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **REQ-DASH-01** | Executive Cash Flow Summary | Must Have | MVP | REQ-SAL-01, EXP-01 | Real-time aggregate showing Recorded Salary, Fixed Expenses, Variable Expenses, Savings Contributions, and Recorded Salary Remaining (Estimate). |
-| **REQ-DASH-02** | Financial Health Ratios | Must Have | MVP | REQ-DASH-01 | Renders Savings Rate (`Savings / Income * 100`) and Expense Ratio (`Expenses / Income * 100`) with color-coded badges. |
-| **REQ-DASH-03** | Period Month/Year Switcher | Must Have | MVP | REQ-DASH-01 | Interactive header control to switch between active month and previous months; re-aggregates view instantly. |
-| **REQ-REP-01** | Multi-Month Trend Reports | Should Have | Post-MVP | REQ-DASH-01 | 6-month & 12-month historical expenditure trends without synthetic data interpolation. |
+| **REQ-DASH-01** | Selected-Period Cash Flow Summary | Must Have | MVP | REQ-SAL-01, EXP-01 | Real-time aggregate for the selected Financial Period showing Recorded Salary, Fixed Expenses, Variable Expenses, Savings Contributions, and Recorded Salary Remaining (Estimate). Excludes Post-MVP modules (Investments, Loans, Insurance). |
+| **REQ-DASH-02** | Financial Health Ratios | Must Have | MVP | REQ-DASH-01 | Renders Savings Rate (`Savings / Salary * 100`) and Expense Ratio (`Expenses / Salary * 100`) with color-coded badges and explicit denominators. |
+| **REQ-DASH-03** | Period Month/Year Switcher | Must Have | MVP | REQ-DASH-01 | Interactive header control to switch between active month and historical Financial Periods; queries are read-only and never mutate stored records. |
+| **REQ-DASH-04** | Selected Financial Period Context | Must Have | MVP | REQ-DASH-01 | Prominently displays the active period context (e.g. `Financial Period: October 2026`). All summary cards and metrics displayed belong strictly to that period. |
+| **REQ-DASH-05** | Excess Outflow Warning Presentation | Must Have | MVP | REQ-DASH-01 | When `Expenses + Savings > Salary`, primary remaining display renders `0` and an explicit alert banner displays: `Your recorded expenses and savings exceed this period's recorded salary by [Amount]`. |
+| **REQ-REP-01** | Historical Reporting Ranges & Core Aggregates | Must Have | MVP | REQ-DASH-01 | Supports multi-period aggregate analysis across predefined ranges: **Last 3 Months, Last 6 Months, Last 12 Months / 1 Year, All Time**. Computes Total Salary, Total Expenses, Total Savings, Monthly Averages, and Aggregate Savings Rate. |
+| **REQ-REP-02** | Advanced Trend Analytics & Visualizations | Should Have | Post-MVP | REQ-REP-01 | Graphical expenditure trends, monthly comparison matrices, and category burn shifts without synthetic data interpolation. |
 | **REQ-SET-01** | CSV Financial Ledger Export | Could Have | Post-MVP | REQ-EXP-01 | Generates clean CSV file of all recorded transactions for external backup. |
 
 ---
@@ -221,78 +275,80 @@ An administrative role with visibility into user ledgers is **intentionally excl
 
 ## 7. Primary User Journeys (Business Level)
 
-### Journey 1: New User Onboarding & Setup
+### Journey 1: New User Onboarding & First Financial Period Setup
 ```
-[User Registration] ──► [Auth.js Session Created] ──► [Financial Profile Setup]
+[User Registration] ──► [Auth.js Session Created] ──► [Profile Setup: Currency (PKR)]
                                                               │
                                                               ▼
-[Dashboard Initialized] ◄── [Set Initial Salary] ◄── [Select Base Currency (PKR)]
+[Dashboard Initialized] ◄── [Activate Financial Period] ◄── [Select Month & Record Salary]
 ```
 1. **Registration:** User creates an account with email and password; session cookie is issued.
-2. **Profile Setup:** User selects base currency (mandatory, default: PKR), with optional setup for monthly income target and emergency fund horizon (default: 6 months; non-blocking).
-3. **Initial Salary Record:** User manually records their current month's salary amount.
-4. **Dashboard View:** User lands on `/dashboard`, displaying their recorded salary and unallocated budget pool.
+2. **Profile Setup:** User selects base currency (mandatory, default: PKR), with optional non-blocking setup for monthly income target and emergency fund horizon (default: 6 months).
+3. **First Financial Period Activation:** User explicitly selects their initial Financial Period (e.g., October 2026) and records their primary monthly salary amount.
+4. **Dashboard View:** User lands on `/dashboard`, displaying their active Financial Period context, recorded salary, and unallocated budget pool.
 
-### Journey 2: Monthly Payday Allocation Workflow (Zero-Based Budgeting)
+### Journey 2: Monthly Financial Period Activation & Zero-Based Allocation
 ```
-[User Manually Records Salary] ──► [Open /salary Form] ──► [Review Unallocated Budget Pool]
+[Select Calendar Month] ──► [Record Primary Salary] ──► [Financial Period Activated]
                                                                   │
                                                                   ▼
-[Zero Unallocated Pool Achieved] ◄── [Assign Planned Savings/Variable] ◄── [Allocate Planned Fixed Costs]
+[Zero Unallocated Pool] ◄── [Assign Category Envelopes] ◄── [Open /budget Planning View]
 ```
-1. **Salary Recording:** User opens `/salary` and manually logs their net salary amount for the active month without bank-feed verification.
-2. **Allocation Planning:** User enters the budget view where the unallocated budget pool equals the recorded salary.
-3. **Partitioning:** User assigns planned currency envelopes to:
-   - Fixed Living Costs (Rent, Utilities, Tuition)
-   - Savings Goals (Emergency Reserve, Future Event)
-   - Discretionary Variable Pool (Groceries, Dining, Leisure)
-4. **Target State:** The unallocated budget pool reaches zero (`Income - Allocations = 0`), establishing a complete forward-looking monthly plan. (Assigning allocations is a planning intention and does not constitute actual spending or actual savings).
+1. **Financial Period Selection:** User explicitly selects the calendar month for the new period (e.g., November 2026). The system never guesses or infers the period from payment dates.
+2. **Salary Recording:** User logs their primary net salary amount for the selected period without bank-feed verification.
+3. **Period Activation:** Storing the salary activates the November 2026 Financial Period, making it available for monthly budgeting, expense logging, and savings contributions.
+4. **Allocation Planning:** User enters `/budget` where the unallocated budget pool equals the recorded salary.
+5. **Partitioning:** User assigns planned envelopes to Fixed Living Costs, Savings Goals, and Variable categories until unallocated budget pool reaches zero (`Income - Allocations = 0`), establishing a balanced monthly plan.
 
 ### Journey 3: Expense Logging & Budget Burn
 ```
-[Expense Occurs] ──► [Open Log Expense Form] ──► [Server Validation]
-                                                         │
-                                                         ▼
-[Dashboard Alert Triggered] ◄── [Recalculate Remaining] ◄── [Persist Record in MongoDB]
+[Select Active Financial Period] ──► [Open Log Expense Form] ──► [Server Validation]
+                                                                        │
+                                                                        ▼
+[Dashboard Alert / Excess Warning] ◄── [Recalculate Remaining] ◄── [Persist Record in MongoDB]
 ```
-1. **Entry:** User logs amount, date, description, category, and classification (`Fixed` vs. `Variable`).
-2. **Validation:** Server verifies amount > 0, <= 2 decimal places, valid calendar date, and valid category.
-3. **Persistence:** Document is saved to MongoDB under the user's `userId`.
-4. **Budget Impact:** Recorded Salary Remaining (Estimate) is recomputed; category budget progress bar increments; if actual spending exceeds the planned allocation, a visual warning badge is displayed. Stored salary records are never altered.
+1. **Prerequisite Check (Sequential Gating):** Normal UI requires an active Financial Period with recorded salary. If no period exists, the user is redirected to activate the period and record salary first.
+2. **Entry:** User logs amount, transaction date, description, category, and classification (`Fixed` vs. `Variable`) within the selected Financial Period. The transaction date provides chronological sorting within the period but does not override the user-selected Financial Period boundary.
+3. **Validation:** Server verifies amount > 0, <= 2 decimal places, valid calendar date, and valid category.
+4. **Persistence:** Document is saved to MongoDB under the user's `userId` and associated with the selected Financial Period.
+5. **Budget Impact & Excess Warning:** Recorded Salary Remaining (Estimate) is recomputed (`Recorded Salary - Actual Expenses - Actual Savings`). Category budget progress bar increments. If actual spending and savings exceed the period's recorded salary, the primary remaining estimate displays `PKR 0` alongside an explicit warning banner: *"Your recorded expenses and savings exceed this period's recorded salary by [Excess Amount]"*. Stored salary records are never altered.
 
-### Journey 4: Salary Revision / Correction Workflow
+### Journey 4: Financial Period Revision & Historical Edit Workflow
 ```
-[User Identifies Error] ──► [Edit Salary Entry] ──► [Server Validation]
-                                                           │
-                                                           ▼
-[All Periods Reconciled] ◄── [Atomic Recalculation] ◄── [Update Record in MongoDB]
+[Select Historical Period] ──► [Edit Salary / Expense / Savings] ──► [Server Validation]
+                                                                            │
+                                                                            ▼
+[Historical Analytics Recalculated] ◄── [Recalculate Period Snapshot] ◄── [Update MongoDB Document]
 ```
-1. **Edit Action:** User edits a recorded salary record (e.g., correcting an amount after an unexpected tax adjustment).
-2. **Validation:** New amount is validated against precision rules (`<= 90 trillion`, `<= 2 decimals`).
-3. **Atomic Recalculation:** Active period snapshot re-aggregates immediately via pure deterministic functions.
-4. **Reconciliation:** Dashboard figures, unallocated budget pool, Recorded Salary Remaining (Estimate), and savings rate update consistently.
+1. **Period Selection:** User navigates to an older, completed Financial Period (e.g., September 2026) using the period switcher.
+2. **Edit Action:** User modifies a recorded salary figure, expense item, or savings contribution belonging to that period (e.g., correcting an invoice or logging a retroactive utility payment).
+3. **Validation:** New amounts are validated against precision rules (`<= 90 trillion`, `<= 2 decimals`).
+4. **Isolated Period Recalculation:** That specific Financial Period's calculations and dashboard metrics update immediately via pure deterministic functions. Other Financial Periods (e.g., October, November) remain completely untouched and independent.
+5. **Cross-Period Analytics Update:** Historical aggregate reports (Last 3M, 6M, 12M, All Time) automatically recompute from the updated underlying raw records upon request.
 
 ### Journey 5: Savings Goal Contribution
 ```
-[User Saves Cash] ──► [Log Contribution Record] ──► [Goal Balance Increments]
-                                                           │
-                                                           ▼
-[Emergency Runway Extended] ◄── [Non-Expense Accounting] ◄── [Progress Bar Updates]
+[Select Active Financial Period] ──► [Log Contribution Record] ──► [Goal Balance Increments]
+                                                                          │
+                                                                          ▼
+[Emergency Runway Extended] ◄── [Non-Expense Accounting] ◄── [Recalculate Remaining Estimate]
 ```
-1. **Contribution Entry:** User logs a cash transfer into their Emergency Fund goal under `/savings`.
-2. **Accounting Check:** System increments goal accumulated total; ensures the contribution is **not** added to monthly expenses.
-3. **Metric Update:** Monthly savings rate increases; emergency fund runway indicator recomputes (e.g., 3.8 months funded).
+1. **Prerequisite Check:** Requires an active Financial Period with recorded salary.
+2. **Contribution Entry:** User logs a cash allocation into their Emergency Fund or Wealth Creation goal under `/savings` for the selected period.
+3. **Accounting Check:** System increments the goal's accumulated total and accounts for it as actual savings. The contribution is strictly **not** added to monthly expenses.
+4. **Metric Update:** Monthly savings rate increases; emergency fund runway indicator recomputes; Recorded Salary Remaining (Estimate) decreases by the savings contribution amount.
 
-### Journey 6: Month-End Review & Historical Audit
+### Journey 6: Cross-Period Historical Analytics & Reporting Audit
 ```
-[Select Completed Month] ──► [Inspect Recorded Inflow] ──► [Sum Actual Outflows]
-                                                                  │
-                                                                  ▼
-[Next Month Planning] ◄── [Evaluate Savings Rate] ◄── [Compare Budget vs Actual]
+[Navigate to /reports] ──► [Select Reporting Range (3M/6M/12M/All)] ──► [Aggregate Raw Period Records]
+                                                                                │
+                                                                                ▼
+[Long-Term Financial Strategy] ◄── [Evaluate Savings Rate & Trends] ◄── [Render Multi-Period Metrics]
 ```
-1. **Period Selection:** User switches to a prior calendar month using the period navigation control.
-2. **Ledger Review:** Reviews final savings rate, fixed vs. variable spending ratio, and budget variances.
-3. **Learning Loop:** Identifies categories that exceeded planned allocations to improve next month's zero-based budget.
+1. **Reporting Range Selection:** User navigates to `/reports` and selects a predefined historical reporting range: **Last 3 Months, Last 6 Months, Last 12 Months / 1 Year, or All Time**.
+2. **Multi-Period Aggregation:** The reporting engine aggregates underlying independent Financial Period records across the selected window without cross-period data leakage.
+3. **Core Metric Evaluation:** User reviews aggregated metrics: Total Recorded Salary, Total Actual Expenses, Total Actual Savings, Average Monthly Salary, Average Monthly Expenses, Average Monthly Savings, and Aggregate Savings Rate (`Total Savings ÷ Total Recorded Salary × 100`).
+4. **Strategic Planning:** Historical trendlines provide factual baseline data to guide future monthly zero-based budget allocations.
 
 ---
 
@@ -300,26 +356,35 @@ An administrative role with visibility into user ledgers is **intentionally excl
 
 | Rule ID | Financial Business Principle | Enforcement in Fintrack |
 | :--- | :--- | :--- |
-| **FBR-01** | **Manually Recorded Inflow:** Salary is a recorded value, not independently verified cash. | Recorded as an input value for the specified calendar period. No bank verification or Pending/Received gating in MVP. |
+| **FBR-01** | **Manually Recorded Salary & Period Activation:** Salary is a recorded value, not independently verified cash. | Recorded as an input value for the user-selected calendar month. Storing primary salary activates the Financial Period. No bank verification, no automated guessing from transaction dates, and no Pending/Received states. |
 | **FBR-02** | **Planned Allocation vs. Actual Spending:** Planned budgets must not be conflated with actual expenses. | Budget envelopes represent spending intentions. Actual expenses are independent transactions that consume envelope limits. |
 | **FBR-03** | **Actual Savings vs. Goal Targets:** Savings goals are target milestones; actual savings are distinct deposited records. | Decoupled into `SavingsGoal` (the target) and `SavingsRecord` (the actual accumulated deposits). |
 | **FBR-04** | **Savings Non-Duplication:** Savings contributions must never be counted as expenses. | The allocation engine treats expenses and savings contributions as mutually exclusive buckets. |
 | **FBR-05** | **No Account-Ledger Internal Transfers:** Unified single inflow pool in MVP. | Because individual bank accounts (HBL, Meezan, cash) are excluded from MVP, account-to-account transfer rules are omitted. |
-| **FBR-06** | **Zero Invented Historical Data:** Missing months must never be filled with synthetic data. | Missing periods evaluate strictly to zero. No synthetic interpolation or phantom records are generated. |
+| **FBR-06** | **Zero Invented Historical Data & Sequential Gating:** Missing months must never be filled with synthetic data. | Missing periods evaluate strictly to zero. Normal UI flow prevents expense/savings logging without an active period with recorded salary. No synthetic interpolation or phantom records. |
 | **FBR-07** | **Explicit Forecast Labeling:** Any future projections must be strictly flagged. | Projections and targets are visually isolated from historical recorded ledger data. |
 | **FBR-08** | **Reconciliation Consistency:** Record edits must immediately re-aggregate all metrics. | All dashboard aggregates are pure functions computed on demand from raw records, preventing stale cached states. |
 | **FBR-09** | **Monetary Precision Strategy:** Zero floating-point arithmetic drift. | All money stored in MongoDB as `Decimal128` and computed in Node.js via minor-unit integer scaling (`safeAdd`, `safeSubtract`, `safeSum`). |
 | **FBR-10** | **Multi-Tenant Ledger Isolation:** Absolute privacy and data segregation. | Every database read/write is strictly scoped by `userId`. Cross-tenant queries return `RecordNotFoundError`. |
+| **FBR-11** | **Sequential Monthly Record Gating:** `Financial Period → Recorded Salary → Expenses / Savings`. | Normal application workflow strictly requires an active Financial Period with recorded salary before monthly expenses or savings contributions can be entered. |
+| **FBR-12** | **Financial Period Independence & Isolation:** Each monthly period is an isolated ledger. | Modifying an older Financial Period updates only that period's calculations and cross-period aggregates recomputed from raw records; other periods remain completely unaffected. |
+| **FBR-13** | **Excess Outflow Presentation Rule:** Outflows exceeding salary trigger explicit warnings without misleading negatives. | When `Expenses + Savings > Recorded Salary`, the system preserves the signed value internally, but displays primary Remaining Estimate as `PKR 0` alongside an explicit warning banner: *"Your recorded expenses and savings exceed this period's recorded salary by PKR X."* |
+| **FBR-14** | **Single Primary Salary Rule (MVP):** Exactly one primary salary record per Financial Period. | MVP assumes a single primary monthly salary per Financial Period. Additional income streams are logged as a separate open decision/enhancement. |
+| **FBR-15** | **Percentage & Denominator Discipline:** All analytical percentages require explicit, unambiguous denominators. | Savings Rate across any selected reporting range is strictly: `Total Savings ÷ Total Recorded Salary × 100`. Categories shown in allocation charts must not double-count overlapping funds. |
+| **FBR-16** | **MVP Calculation Kernel Boundary:** Exclude Post-MVP balance sheet modules from MVP math. | MVP calculation kernel is strictly: `Recorded Salary Remaining (Estimate) = Recorded Salary - Actual Expenses - Actual Savings`. Investments, Loans, and Insurance remain Post-MVP and are excluded from the MVP calculation kernel. |
 
 ---
 
 ## 9. Assumptions and Technical/Product Constraints
 
 ### 9.1 Confirmed Assumptions
-1. **Monthly Financial Rhythm:** Salaried users operate on a monthly pay cycle; budgets and ledgers are organized by calendar month (`periodYear`, `periodMonth`).
-2. **Manual Record-Keeping:** Users take responsibility for manually entering salary and daily expenses; Fintrack provides validation, aggregation, and visual planning.
-3. **Single Base Currency:** An individual user operates under one chosen base currency (default: PKR); multi-currency conversion is not required in MVP.
-4. **Unified Monthly Inflow Pool:** All recorded income flows into a single consolidated pool for that month; no bank account partitioning.
+1. **Financial Period as Authoritative Monthly Boundary:** Salaried users operate under user-selected calendar months (`periodYear`, `periodMonth`). The application associates all monthly records with the explicitly selected Financial Period and never guesses or infers the period from transaction or payment dates.
+2. **Sequential Record Gating:** An active Financial Period with recorded salary is a strict prerequisite before monthly expenses or savings contributions can be logged in normal workflows (`Financial Period → Recorded Salary → Expenses / Savings`).
+3. **Single Primary Salary per Period (MVP):** Each Financial Period is defined by one primary recorded net monthly salary. Multi-stream income is deferred as an explicit open decision.
+4. **Period Independence & Isolation:** Each Financial Period is completely independent. Editing an older period recalculates that period's snapshot and re-aggregates historical reports from raw documents without mutating other periods.
+5. **Manual Record-Keeping:** Users take responsibility for manually entering salary and daily expenses; Fintrack provides validation, aggregation, and visual planning.
+6. **Single Base Currency:** An individual user operates under one chosen base currency (default: PKR); multi-currency conversion is not required in MVP.
+7. **Unified Monthly Inflow Pool:** Recorded salary constitutes the unallocated budget pool for that specific period; no bank account partitioning.
 
 ### 9.2 Technical Constraints
 1. **Next.js 16 App Router & React 19:** Built on modern Next.js server components, server actions, and Turbopack.
@@ -328,8 +393,9 @@ An administrative role with visibility into user ledgers is **intentionally excl
 4. **Server-Side Authorization:** Tenant verification and input validation must run strictly on the server; client requests are never trusted.
 
 ### 9.3 Product Constraints
-1. **No Third-Party Banking APIs:** Zero dependency on external banking aggregators, screen scrapers, or payment gateways.
-2. **Zero Automated Ledger Guesses:** If a user forgets to log an expense, Fintrack does not infer or guess transactions.
+1. **No Third-Party Banking APIs:** Zero dependency on external banking aggregators, screen scrapers, or payment gateways. Fintrack is a manual record-keeping application, not a bank.
+2. **Zero Automated Ledger Guesses:** If a user forgets to log an expense, Fintrack does not infer or guess transactions. Payment dates never override user-selected Financial Periods.
+3. **Sequential Outflow Gating:** The normal UI flow strictly prevents creating expenses or savings for a month that does not have an active Financial Period with recorded salary.
 
 ---
 
@@ -337,14 +403,17 @@ An administrative role with visibility into user ledgers is **intentionally excl
 
 The MVP will be accepted as complete when all the following conditions are verified:
 
-1. **Functional End-to-End Flow:** A user can register, log in, configure profile currency, record monthly salary, allocate budget envelopes, log fixed/variable expenses, contribute to savings goals, and view updated dashboard metrics.
-2. **Calculation Determinism:** 100% of calculation test suites pass with zero floating-point rounding errors (`Recorded Net Salary - (Actual Expenses + Actual Savings) = Recorded Salary Remaining (Estimate)` balances exactly).
-3. **Savings Integrity:** Depositing funds into a savings goal increments the goal balance and increases the savings rate without increasing total expenses.
-4. **Multi-Tenant Security:** Automated tests verify that User A cannot read, query, update, or delete any record belonging to User B.
-5. **Validation Hardening:** Server rejects negative amounts, zero amounts (where disallowed), sub-cent precision (>2 decimals), and invalid category IDs.
-6. **Responsive Layout:** Clean visual presentation across mobile (320px), tablet (768px), and desktop (1280px) with functional mobile drawer navigation.
-7. **Accessibility Baseline:** Form inputs have associated labels, interactive elements support keyboard tabbing, and contrast meets WCAG AA standards.
-8. **Performance Baseline:** Dashboard SSR latency < 300ms on standard connections; indexed queries execute in < 30ms.
+1. **Functional End-to-End Flow:** A user can register, log in, configure profile currency, explicitly select a calendar month to activate a Financial Period, record primary salary, allocate zero-based budget envelopes, log fixed/variable expenses, contribute to savings goals, view isolated period dashboard metrics, and inspect historical reports across Last 3M, Last 6M, Last 12M, and All Time.
+2. **Calculation Determinism & Kernel Boundary:** 100% of calculation test suites pass with zero floating-point rounding errors using the MVP formula: `Recorded Salary Remaining (Estimate) = Recorded Salary - Actual Expenses - Actual Savings`. Post-MVP modules (Investments, Loans, Insurance) are excluded from the kernel calculation.
+3. **Excess Outflow Warning Presentation:** When `Actual Expenses + Actual Savings > Recorded Salary`, the system preserves the signed value internally, but displays primary Remaining Estimate as `PKR 0` alongside an explicit warning banner: *"Your recorded expenses and savings exceed this period's recorded salary by [Amount]"*.
+4. **Sequential Record Gating:** Automated UI tests verify that a user cannot log expenses or savings for a month without first selecting the calendar month and recording its salary.
+5. **Period Isolation & Edit Integrity:** Editing a historical Financial Period recomputes that period's metrics and historical multi-period aggregates without mutating neighboring periods.
+6. **Savings Integrity:** Depositing funds into a savings goal increments the goal balance and increases the savings rate without increasing total expenses.
+7. **Multi-Tenant Security:** Automated tests verify that User A cannot read, query, update, or delete any record belonging to User B.
+8. **Validation Hardening:** Server rejects negative amounts, zero amounts (where disallowed), sub-cent precision (>2 decimals), and invalid category IDs.
+9. **Responsive Layout & Period Context:** Clean visual presentation across mobile (320px), tablet (768px), and desktop (1280px) with unambiguous display of the currently selected Financial Period.
+10. **Accessibility Baseline:** Form inputs have associated labels, interactive elements support keyboard tabbing, and contrast meets WCAG AA standards.
+11. **Performance Baseline:** Dashboard SSR latency < 300ms on standard connections; indexed queries execute in < 30ms.
 
 ---
 
@@ -454,31 +523,37 @@ Phase 13: Monitoring, Maintenance & Future Development
 
 ## 14. Remaining Open Questions & Unresolved Dependencies
 
-While the five foundational architectural decisions (Database engine, Manual salary entry, Single inflow pool, Zero-Based Budgeting model, Auth.js direction) have been resolved, four critical financial domain dependencies remain **UNRESOLVED** and currently block downstream phase gate approvals:
+All five foundational architectural decisions (Database engine, Manual salary entry, Single inflow pool, Zero-Based Budgeting model, Auth.js direction) and all four foundational financial domain rules have been formally resolved and integrated into the canonical requirements.
 
-### 14.1 Blocking Financial Domain Dependencies (Affecting Phase 2)
-1. **Period Attribution Policy (Calendar-Month vs. Salary Pay-Period):**
-   - *Conflict:* Salary entries carry a pay period (`payPeriodYear`, `payPeriodMonth`) and payment date, while Expense and Savings entries carry a transaction `date`.
-   - *Unresolved Decision:* Does the dashboard filter all transactions strictly by calendar month of transaction date (`date.getMonth() + 1 == periodMonth`), or does Fintrack support salary-cycle date windows (e.g. 25th to 24th)?
-   - *Phase 2 Impact:* Affects period-switcher state contracts in the header and ledger filtering consistency across `/dashboard`, `/salary`, and `/expenses`.
-2. **Missing-Salary Behavior for Recorded Salary Remaining (Estimate):**
-   - *Conflict:* If a user navigates to a month where no salary entry has been logged, but fixed or variable expenses exist.
-   - *Unresolved Decision:* Does `Recorded Salary Remaining (Estimate)` calculate as a negative number (`0 - outflows`), display zero, or render an uncalculated/warning state prompting the user to record salary first?
-   - *Phase 2 Impact:* Affects KPI card rendering and empty/error states on `/dashboard`.
-3. **Excess-Outflow Warning Specification:**
-   - *Conflict:* If cumulative recorded expenses and savings exceed recorded salary for the month (`Outflows > Salary`).
-   - *Unresolved Decision:* What exact visual indicator and business rule should be triggered (negative balance in Rose, explicit warning banner, or deficit counter)?
-   - *Phase 2 Impact:* Determines alert badges and state contracts in `/dashboard` and `/budget`.
-4. **Investments Scope & Calculation Kernel Reconciliation:**
-   - *Conflict:* Investments is explicitly classified as Post-MVP in Sections 3.3 and 3.4. However, the calculation kernel (`lib/calculations/financial.ts`) incorporates `totalInvestments` into `totalAllocated` and `remainingIncome`.
-   - *Required Decision:* Reconcile calculation inputs so MVP calculations strictly execute `Recorded Net Salary - (Actual Expenses + Actual Savings)` without promoting Investments, Insurance, or Loans into MVP.
+### 14.1 Resolution of Previous Blocking Financial Domain Dependencies (Approved & Closed)
+1. **Period Attribution Policy: RESOLVED**
+   - *Confirmed Rule:* Fintrack MVP uses a user-selected calendar month as the authoritative **Financial Period** (e.g., October 2026, November 2026).
+   - *System Behavior:* The system associates all monthly financial records with the user-selected Financial Period and does not guess or infer the period from payment or transaction entry dates. If individual transaction dates are entered for chronological tracking within the month, they do not override the user-selected Financial Period.
+2. **Missing-Salary Dashboard/Entry Behavior: RESOLVED for Normal MVP Workflow**
+   - *Confirmed Rule:* Sequential record gating is strictly enforced: `Financial Period → Recorded Salary → Expenses / Savings`.
+   - *System Behavior:* A user must select a calendar month and record its primary salary to activate the Financial Period before any monthly expenses or savings can be entered. The normal UI workflow strictly blocks expense and savings entry when no Financial Period with recorded salary exists for that month. Potential edge cases regarding legacy or orphan records are retained as future data-integrity considerations rather than expanding MVP scope.
+3. **Excess-Outflow Warning Specification: RESOLVED**
+   - *Confirmed Rule:* When cumulative recorded actual expenses and actual savings exceed the period's recorded salary (`Actual Expenses + Actual Savings > Recorded Salary`):
+     - The underlying signed arithmetic calculation is preserved internally for precision and mathematical correctness.
+     - The primary user-facing remaining estimate displays `PKR 0` rather than a misleading negative spendable amount.
+     - An explicit visual warning banner is rendered: *"Your recorded expenses and savings exceed this period's recorded salary by PKR X."*
+4. **Investments Scope & Calculation Kernel Reconciliation: RESOLVED**
+   - *Confirmed Rule:* Investments, Loans, and Insurance remain strictly Post-MVP.
+   - *System Behavior:* The MVP calculation kernel is cleanly scoped to:
+     $$\text{Recorded Salary Remaining (Estimate)} = \text{Recorded Salary} - \text{Actual Expenses} - \text{Actual Savings}$$
+     Post-MVP balance sheet modules are excluded from MVP calculations and dashboard summaries.
 
-### 14.2 Non-Blocking Future Implementation Decisions
-5. **Authentication Session Adapter vs. JWT (Phase 4 / Phase 8):**
-   - *Options:* Auth.js with MongoDB session store adapter vs. stateless encrypted JWT session cookies.
-6. **Budget Rollover Policy (Phase 5 / Phase 6):**
+### 14.2 Remaining Non-Blocking Future Open Decisions (Scheduled for Subsequent Phases)
+The following items do not block Phase 2 Information Architecture and are scheduled for detailed design in their respective implementation phases:
+1. **Financial Period Deletion & Cascade Policy (Phase 5 / Phase 6):**
+   - *Open Decision:* If a user initiates deletion of an existing Financial Period, should the system perform a cascading purge of associated expenses and savings, apply soft-deletion/archival, or disallow deletion until child records are manually removed? To be determined during Phase 5 Data Modeling.
+2. **Multi-Stream Salary & Secondary Incomes (Phase 5 / Phase 6 Enhancement):**
+   - *Open Decision:* Fintrack MVP assumes exactly one primary recorded monthly salary per Financial Period. Extending the schema to support secondary income streams (freelance, bonuses, rental income) is cataloged as a future enhancement requiring product design approval.
+3. **Authentication Session Adapter vs. Stateless JWT (Phase 4 / Phase 8):**
+   - *Options:* Auth.js with MongoDB database session adapter vs. stateless encrypted JWT session cookies.
+4. **Budget Rollover Policy (Phase 5 / Phase 6):**
    - *Options:* Strict zero-reset each month vs. optional surplus/deficit rollover to the following month's envelope.
-7. **CSV Export Specification (Post-MVP Phase D):**
+5. **CSV Export Specification (Post-MVP Phase D):**
    - *Options:* Flat single-ledger export vs. multi-tab breakdown (Salary, Expenses, Savings).
 
 ---
@@ -503,7 +578,7 @@ While the five foundational architectural decisions (Database engine, Manual sal
 - [x] Risks
 - [x] Dependencies
 - [x] Existing implementation audit
-- [ ] Open questions resolved (4 blocking financial domain dependencies remaining in Section 14.1)
+- [x] Open questions resolved (All 4 foundational domain blockers resolved; non-blocking implementation decisions cataloged in Section 14.2)
 
 ### Phase 2 — Information Architecture
 - [ ] Sitemap
@@ -607,20 +682,28 @@ While the five foundational architectural decisions (Database engine, Manual sal
 
 ## 16. Phase 1 Gate Decision & Audit Status
 
-### PHASE 1 STATUS: BLOCKED (Unresolved Domain & Accounting Dependencies)
+### PHASE 1 STATUS: COMPLETE (Canonical Requirements Formally Approved)
 
-**Summary of Confirmed Product & Architectural Decisions:**
-1. **Database:** Standardized 100% on **MongoDB + Mongoose**. Prisma/PostgreSQL code is confirmed as legacy to be phased out in subsequent phases.
-2. **Salary Inflow:** Manually recorded amount and pay period. No bank verification and no `Pending → Received` state machine in MVP.
-3. **Account Boundaries:** Unified single monthly recorded inflow pool. No individual bank accounts (HBL, Meezan, cash), no account balances, no internal transfers, and no account reconciliation in MVP.
-4. **Budgeting Model:** **Zero-Based Budgeting** model where planned allocations are clearly distinguished from actual recorded spending and actual savings.
-5. **Authentication Direction:** **Auth.js (self-managed credentials and session handling)** with tenant isolation enforced strictly on the server.
+**Summary of Confirmed Foundational Architectural & Product Decisions:**
+1. **Core Monthly Boundary (Financial Period Model):** Fintrack operates on the **Financial Period**, representing a user-selected calendar month (e.g., October 2026). The user explicitly selects the month when recording salary, which activates that period. The system never guesses or infers periods from payment or transaction dates.
+2. **Sequential Record Gating:** Enforced workflow: `Financial Period → Recorded Salary → Expenses / Savings`. Normal UI prevents creating expenses or savings unless an active Financial Period with recorded salary exists for that month.
+3. **Monthly Period Independence & Historical Editability:** Each Financial Period is completely isolated. A user can return to any past period and edit its salary, expenses, or savings; recomputation updates only that period's snapshot and re-aggregates multi-period historical reports from raw records without mutating other periods.
+4. **Single Primary Salary (MVP):** MVP assumes exactly one primary recorded monthly salary per Financial Period.
+5. **MVP Calculation Kernel Boundary:** Excludes Post-MVP modules (Investments, Loans, Insurance). Kernel formula is strictly:
+   $$\text{Recorded Salary Remaining (Estimate)} = \text{Recorded Salary} - \text{Actual Expenses} - \text{Actual Savings}$$
+6. **Excess Outflow Presentation Rule:** When outflows exceed recorded salary, internal calculations remain signed for accuracy, but the primary user-facing remaining estimate displays `PKR 0` alongside an explicit warning banner showing the excess amount.
+7. **Selected-Period Dashboard Context:** The dashboard provides unambiguous visibility into the currently active/selected Financial Period context and displays period-specific metrics (Recorded Salary, Actual Expenses, Actual Savings, Recorded Salary Remaining Estimate).
+8. **Historical Reporting Ranges:** Multi-period historical analysis across predefined reporting ranges: **Last 3 Months, Last 6 Months, Last 12 Months / 1 Year, and All Time**. Metrics include Totals, Monthly Averages, and Aggregate Savings Rate ($\text{Total Savings} \div \text{Total Recorded Salary} \times 100$).
+9. **Budgeting & Accounting Rules:** Zero-Based Budgeting model where planned category envelopes are strictly distinguished from actual recorded expenses and actual savings contributions.
+10. **Database & Auth Standards:** Standardized on **MongoDB + Mongoose** with `Decimal128` monetary precision and **Auth.js** server-side authorization.
 
-**Audit Evaluation:**
-While the five core product decisions are established, Phase 1 cannot be approved as cleanly complete because four critical financial domain rules (Period Attribution, Missing-Salary handling, Excess-Outflow warnings, and Investments calculation scope reconciliation) remain unresolved. These dependencies directly impact Phase 2 Information Architecture and user flows.
+**Gate Evaluation:**
+All four previously blocking financial domain dependencies (Period Attribution, Missing-Salary behavior, Excess-Outflow presentation, and Investments scope reconciliation) have been definitively resolved and documented. Terminology across the entire document conforms strictly to manual personal finance principles. The requirements are fully aligned, mathematically grounded, and internally consistent.
+
+**Gate Outcome:** **PHASE 1 COMPLETE — APPROVED FOR PHASE 2.**
 
 ---
 
 ## 17. Recommended Next Action
 
-Do **NOT** advance to Phase 3. Resolve the four specific Phase 1 blocking questions in Section 14.1 before re-evaluating the Phase 1 and Phase 2 gates.
+Proceed strictly to **Phase 2: Information Architecture & User Flows** to align the sitemap, routes, navigation hierarchy, user-flow diagrams, and screen-state contracts with the approved Financial Period Model. Do not start Phase 3 design work or modify application code.
