@@ -3,8 +3,8 @@
 **Project:** Fintrack (Personal Salary & Wealth Management Web Application)  
 **Roles:** Senior Product Engineer, Software Architect, UI/UX Designer, Business Analyst  
 **Workflow Stage:** Phase 2 — Information Architecture & User Flows  
-**Status:** **PHASE 2 STATUS: COMPLETE**  
-**Document Version:** 1.0.0 (Approved Baseline)  
+**Status:** **PHASE 2 STATUS: BLOCKED** (Pending Resolution of Phase 1 Dependencies & Accounting Invariants)  
+**Document Version:** 1.1.0 (Audited Baseline — Gate Blocked)  
 **Date:** October 2026  
 
 ---
@@ -15,11 +15,11 @@ Phase 2 translates the product requirements, accounting boundaries, and confirme
 
 ### 1.1 Grounded Architecture Baseline
 Following the strict decisions approved in Phase 1:
-1. **Salary-First Cash Flow:** Every navigation hierarchy and user journey originates from or reconciles back to the **recorded monthly salary inflow**.
-2. **Zero-Based Budgeting (ZBB) First-Class Integration:** The legacy navigation shell ([`components/layout/sidebar.tsx`](file:///c:/1.%20MY%20PROJECTS/SALARY%20MS/fin-track/components/layout/sidebar.tsx)) omitted a dedicated budget route despite ZBB being a core product requirement. Phase 2 formalizes `/budget` as a primary navigation destination immediately following `/salary`.
-3. **Unified Single Cash Pool:** The IA contains zero screens, modals, or dropdowns for individual bank accounts (HBL, Meezan, cash accounts), bank linking, or internal transfer reconciliations.
+1. **Salary-First Cash Flow Discipline:** Every navigation hierarchy and user journey originates from or reconciles back to the **manually recorded monthly salary inflow**. Users manually enter their salary; the system never claims to verify payday, salary receipt, or bank account deposits.
+2. **Zero-Based Budgeting (ZBB) First-Class Integration:** The legacy navigation shell ([`components/layout/sidebar.tsx`](file:///c:/1.%20MY%20PROJECTS/SALARY%20MS/fin-track/components/layout/sidebar.tsx)) omitted a dedicated budget route despite ZBB being a core product requirement. Phase 2 formalizes `/budget` as a primary navigation destination immediately following `/salary`. Planned allocations in `/budget` are forward-looking spending/saving intentions, not actual cash movements.
+3. **Unified Single Inflow Pool:** The IA contains zero screens, modals, or dropdowns for individual bank accounts (HBL, Meezan, cash accounts), bank linking, or internal transfer reconciliations.
 4. **Clean Staging (MVP vs. Post-MVP):** The route inventory and navigation structure clearly distinguish MVP core routes (Dashboard, Salary, Budget, Expenses, Savings, Settings) from Post-MVP commitments (Loans, Insurance, Investments, Reports), ensuring zero scope creep during implementation.
-5. **Multi-Tenant Route Isolation:** All application routes operate within a protected `(app)` route group guarded by centralized authentication middleware.
+5. **Multi-Tenant Route Isolation (Requirement):** All application routes must operate within a protected `(app)` route group to be guarded by centralized authentication middleware (scheduled for implementation in Phase 8; not claimed as currently implemented or verified).
 
 ---
 
@@ -66,9 +66,9 @@ FINTRACK ROOT (/)
 | `/login` | `(auth)` | Public (Guest) | MVP | Sign In | Email & password form; credentials validation via Auth.js. |
 | `/register` | `(auth)` | Public (Guest) | MVP | Sign Up | Account registration; creates `User` document; forwards to `/onboarding`. |
 | `/onboarding` | `(auth)` | Authenticated | MVP | Initial Profile Setup | Base currency selector (PKR default), estimated monthly income, emergency fund months. |
-| `/dashboard` | `(app)` | Authenticated | MVP | Financial Dashboard | Monthly cash snapshot: recorded salary, fixed/variable spend, savings rate, remaining cash. |
+| `/dashboard` | `(app)` | Authenticated | MVP | Financial Dashboard | Monthly financial snapshot: recorded salary, fixed/variable spend, savings rate, recorded salary remaining estimate. |
 | `/salary` | `(app)` | Authenticated | MVP | Salary & Income | List of salary entries, add/edit salary modal, pay period selector, income stream badges. |
-| `/budget` | `(app)` | Authenticated | MVP | Zero-Based Budget | Category envelope allocation form, unallocated pool counter (`Income - Allocations = 0`). |
+| `/budget` | `(app)` | Authenticated | MVP | Zero-Based Budget | Category envelope allocation form, unallocated planning pool counter (`Income - Allocations = 0`). |
 | `/expenses` | `(app)` | Authenticated | MVP | Expense Tracker | Paginated expense ledger, fixed/variable toggle, 14 default categories, filter by month/category. |
 | `/savings` | `(app)` | Authenticated | MVP | Savings & Reserves | Emergency fund runway counter, goal creation modal, goal deposit contribution form. |
 | `/settings` | `(app)` | Authenticated | MVP | Preferences & Config | Base currency configuration, income target update, profile details, sign-out button. |
@@ -91,7 +91,7 @@ The sidebar organizes application modules into logical operational groupings:
   ├── Fintrack Logo & Wordmark ("Salary & Wealth")
   └── Mobile Drawer Dismiss Button (Mobile viewport only)
 
-[ GROUP 1: CASH FLOW MANAGEMENT (MVP Core) ]
+[ GROUP 1: MONTHLY CASH FLOW & BUDGETING (MVP Core) ]
   ├── Dashboard       (Icon: LayoutDashboard, href: /dashboard)
   ├── Salary          (Icon: Wallet,          href: /salary)
   ├── Budget          (Icon: Calculator/Pie,  href: /budget)  <-- Added for ZBB
@@ -146,10 +146,9 @@ flowchart TD
     HasProfile -- No --> Onboarding
     HasProfile -- Yes --> Dashboard
 
-    Onboarding --> SetCurrency[Select Base Currency: PKR Default]
-    SetCurrency --> SetIncomeTarget[Enter Estimated Monthly Net Salary]
-    SetIncomeTarget --> SetEmergencyMonths[Set Emergency Cushion: 6 Months]
-    SetEmergencyMonths --> SaveProfile[(Save FinancialProfile in DB)]
+    Onboarding --> SetCurrency[Select Base Currency: PKR Default (Mandatory)]
+    SetCurrency --> SetOptionalDefaults[Configure Optional Profile Defaults: Estimated Income & Emergency Cushion (Default: 6 Months)]
+    SetOptionalDefaults --> SaveProfile[(Save FinancialProfile in DB)]
     SaveProfile --> Dashboard
 ```
 
@@ -158,7 +157,7 @@ flowchart TD
 ### Flow 2: Monthly Salary Inflow & Zero-Based Budget Allocation
 ```mermaid
 flowchart TD
-    Payday([Payday Arrives / Salary Received]) --> OpenSalary[Navigate to /salary]
+    Payday([User Manually Records Salary]) --> OpenSalary[Navigate to /salary]
     OpenSalary --> ClickAddSalary[Click 'Record Salary']
     ClickAddSalary --> SalaryModal[Open Record Salary Modal]
 
@@ -171,13 +170,13 @@ flowchart TD
     PromptZBB -- Yes --> OpenBudget[Navigate to /budget]
     PromptZBB -- No --> ViewSalaryLedger[View Updated Salary Ledger]
 
-    OpenBudget --> CalculatePool[Unallocated Cash Pool = Recorded Net Salary]
-    CalculatePool --> AssignEnvelopes[Assign Planned Amounts to Categories: Fixed, Variable, Savings]
+    OpenBudget --> CalculatePool[Unallocated Budget Pool = Recorded Net Salary (Planning Allocation)]
+    CalculatePool --> AssignEnvelopes[Assign Planned Envelope Limits: Fixed, Variable, Savings]
     AssignEnvelopes --> EvaluatePool{Unallocated Pool == 0?}
     
-    EvaluatePool -- Pool > 0 --> ShowSurplusAlert[Badge: Cash Left to Allocate - Assign to Savings or Buffer]
-    EvaluatePool -- Pool < 0 --> ShowDeficitAlert[Badge: Over-Allocated - Reduce Category Envelopes]
-    EvaluatePool -- Exact 0 --> ShowZeroSuccess[Badge: Zero-Based Budget Complete - Every Rupee Assigned]
+    EvaluatePool -- Pool > 0 --> ShowSurplusAlert[Badge: Unallocated Budget Remaining - Assign to Planned Envelopes]
+    EvaluatePool -- Pool < 0 --> ShowDeficitAlert[Badge: Over-Allocated - Reduce Planned Envelopes]
+    EvaluatePool -- Exact 0 --> ShowZeroSuccess[Badge: Zero-Based Budget Balanced - Every Rupee of Recorded Salary Planned]
     
     ShowZeroSuccess --> PersistBudget[(Save Monthly Allocations in MongoDB)]
     PersistBudget --> DashboardSummary[View Reconciled Dashboard]
@@ -207,8 +206,8 @@ flowchart TD
     CheckBudget -- Yes --> TriggerOverBudgetBadge[Display Over-Budget Warning Badge on Category]
     CheckBudget -- No --> NormalBudgetBar[Update Category Burn Progress Bar]
 
-    TriggerOverBudgetBadge & NormalBudgetBar --> UpdateRemainingCash[Decrement Actual Remaining Unspent Cash]
-    UpdateRemainingCash --> RefreshLedger[Render in Paginated Expense Table]
+    TriggerOverBudgetBadge & NormalBudgetBar --> UpdateRemaining[Recalculate Recorded Salary Remaining Estimate]
+    UpdateRemaining --> RefreshLedger[Render in Paginated Expense Table]
 ```
 
 ---
@@ -254,7 +253,7 @@ flowchart TD
     UpdateSalaryDB --> TriggerAtomicRecalc[Trigger Pure Function Recalculation]
     TriggerAtomicRecalc --> RecalcInflow[Recompute Period Recorded Inflow]
     RecalcInflow --> RecalcUnallocated[Recompute Period Unallocated Budget Pool]
-    RecalcUnallocated --> RecalcBurn[Recompute Period Remaining Unspent Cash]
+    RecalcUnallocated --> RecalcBurn[Recompute Period Recorded Salary Remaining Estimate]
     RecalcBurn --> RecalcRatios[Recompute Savings Rate & Expense Ratios]
 
     RecalcRatios --> ReconcileViews[Simultaneously Update /dashboard, /salary, and /budget]
@@ -270,7 +269,7 @@ flowchart TD
     OpenHeader --> ClickPeriodSwitcher[Click 'Active Period: Month Year']
     ClickPeriodSwitcher --> SelectPriorMonth[Select Previous Calendar Month e.g., Sept 2026]
 
-    SelectPriorMonth --> FetchPeriodData[(Query MongoDB Scoped to Selected Year/Month)]
+    SelectPriorMonth --> FetchPeriodData[(Read-Only Scoped Query for Selected Year/Month - Zero Mutations to Records)]
     FetchPeriodData --> RenderPastDashboard[Render Selected Month Financial Snapshot]
 
     RenderPastDashboard --> AuditInflow[Inspect Total Recorded Salary for That Month]
@@ -299,20 +298,20 @@ flowchart TD
 
 #### Route: `/onboarding`
 - **Data Inputs:**
-  - Base Currency dropdown (PKR pre-selected; options: USD, EUR, GBP, AED, SAR).
-  - Target Monthly Net Salary (numeric currency input).
-  - Target Emergency Fund Cushion (selector: 3, 6, 9, 12 months; default: 6).
-- **Actions:** "Complete Setup & Launch Dashboard" button.
+  - Base Currency dropdown (**Mandatory**; PKR pre-selected; options: USD, EUR, GBP, AED, SAR).
+  - Target Monthly Net Salary (**Optional proposed target**; non-blocking numeric currency input).
+  - Target Emergency Fund Cushion (**Optional default recommendation**; selector: 3, 6, 9, 12 months; default: 6).
+- **Actions:** "Complete Setup & Launch Dashboard" button (or "Skip Optional Steps").
 
 ---
 
 ### 6.2 Executive Dashboard (`/dashboard`)
 - **Header Context:** Active pay period indicator, quick period navigation, greeting, quick-action "Log Expense" button.
 - **Top Metric Cards (KPI Band):**
-  1. **Recorded Net Salary:** Total recorded inflow for the period; badge indicating stream count.
+  1. **Recorded Net Salary:** Total recorded inflow for the period; badge indicating stream count. (Stored salary records remain strictly immutable; they are never decremented or modified by expenses or savings).
   2. **Total Expenses:** Cumulative actual spending; broken down into sub-indicators for Fixed vs. Variable.
   3. **Total Savings:** Cumulative deposits into savings goals; does not include general unspent cash.
-  4. **Remaining Unspent Cash:** `Net Salary - (Total Expenses + Total Savings)`. Color-coded (Emerald if positive, Rose if deficit).
+  4. **Recorded Salary Remaining (Estimate):** Formula: `Recorded Net Salary - (Total Actual Expenses + Total Actual Savings Contributions)`. Mathematical estimate of recorded salary not yet logged as expenses or savings for the selected period. It is **NOT** verified bank cash, liquid account balance, or guaranteed "available to spend." Color-coded (Emerald if positive, Rose/Amber if excess outflow).
 - **Health Ratios Band:**
   - **Savings Rate Gauge:** $\frac{\text{Actual Savings}}{\text{Recorded Salary}} \times 100$ (Target: >= 20%).
   - **Expense Ratio Gauge:** $\frac{\text{Actual Expenses}}{\text{Recorded Salary}} \times 100$ (Target: <= 60%).
@@ -338,6 +337,10 @@ flowchart TD
 - **Salary History Table:**
   - Columns: Payment Date, Pay Period, Source, Stream Type (badge), Amount, Actions (Edit, Delete).
   - Pagination bar (20 records per page).
+- **Salary Record Invariants:**
+  - Salary is a manually recorded historical entry; the application does not verify payday, salary receipt, or bank deposits.
+  - Stored salary records are never altered or decremented when expenses, savings, or investments are entered.
+  - There are no Pending/Received verification states in MVP.
 
 ---
 
@@ -345,8 +348,9 @@ flowchart TD
 - **Header:** Title "Zero-Based Budget Allocation", period switcher.
 - **ZBB Summary Banner (The Equalizer):**
   - **Recorded Inflow:** e.g., `₨ 300,000`
-  - **Minus Total Allocated:** `₨ 300,000`
-  - **Equals Unallocated Pool:** `₨ 0` (Visual state: Green checkmark badge "Zero-Based Budget Balanced!").
+  - **Minus Total Planned Allocations:** `₨ 300,000`
+  - **Equals Unallocated Budget Pool:** `₨ 0` (Visual state: Green checkmark badge "Zero-Based Budget Balanced!").
+  - *Planning Principle:* An unallocated or over-allocated budget is strictly a planning state, not evidence of actual cash. Assigning every rupee to an envelope plans the monthly intention; it does not prove or execute actual spending or savings.
   - *Deficit State:* If allocated > salary, banner turns Amber/Rose: `"Over-allocated by ₨ 15,000"`.
 - **Category Allocation Grid:**
   - Grouped into **Fixed Commitments** (Housing, Utilities, Tuition), **Variable Categories** (Groceries, Dining, Apparel), and **Savings Envelopes** (Emergency Reserve, Down Payment).
@@ -354,8 +358,8 @@ flowchart TD
     - Category Icon & Label.
     - Envelope Input (planned numeric amount).
     - Actual Spend to Date (real-time sum of matching expenses).
-    - Variance Indicator (Remaining envelope cash, progress bar, over-budget alert if consumed > 100%).
-- **Actions:** "Save Allocation Plan", "Reset to Previous Month", "Auto-Allocate All Remaining to Emergency Fund".
+    - Variance Indicator (Remaining planned envelope allocation limit, progress bar, over-budget alert if actual spend > planned envelope).
+- **Actions:** "Save Allocation Plan", "Reset Planned Envelopes to Previous Month", "Set Planned Emergency Allocation to Remainder".
 
 ---
 
@@ -377,24 +381,24 @@ flowchart TD
 ---
 
 ### 6.6 Savings & Emergency Reserves (`/savings`)
-- **Header:** Title "Savings & Cash Reserves", primary action button "New Savings Goal", secondary action "Record Deposit".
+- **Header:** Title "Savings & Reserves", primary action button "New Savings Goal", secondary action "Record Contribution".
 - **Emergency Reserve Showcase Card:**
   - Target Months indicator (e.g. "6 Months Living Expenses Target").
   - Calculated Monthly Fixed Baseline (derived automatically from fixed expenses/allocations).
   - Target Emergency Fund Value (e.g. `₨ 180,000/mo * 6 = ₨ 1,080,000`).
-  - Current Accumulated Cash Cushion (e.g. `₨ 720,000` — 66.7% Funded, 4.0 Months Runway).
+  - Current Accumulated Emergency Cushion (e.g. `₨ 720,000` — 66.7% Funded, 4.0 Months Runway).
 - **Savings Goals Grid:**
   - Goal cards for active goals (Emergency Fund, Wedding, House Down Payment, Vacation).
   - Displays: Target Amount, Accumulated Balance, Target Date, Visual Progress Ring/Bar.
-  - Quick action: "Contribute Cash".
+  - Quick action: "Log Contribution".
 - **Record Contribution Modal:**
   - Target Goal selector (dropdown of user's active goals).
   - Amount saved.
-  - Date of deposit.
+  - Date of contribution.
   - Notes.
-  - Explicit notification text: *"Savings deposits increment your goal balance and savings rate. They are never counted as expenses."*
+  - Explicit notification text: *"Savings contributions increment your goal balance and savings rate. They are never counted as expenses."*
 - **Recent Contributions Ledger:**
-  - Chronological audit of all past savings deposits.
+  - Chronological audit of all past savings contributions.
 
 ---
 
@@ -433,7 +437,7 @@ Because Fintrack is a private personal finance tool, roles are strictly partitio
 | `/reports` | Redirect to `/login` | Allowed (Post-MVP feature flag) | Redirect to `/login` |
 
 ### Tenant Access Invariant:
-Attempting to fetch a document using a URL parameter belonging to another user (e.g., requesting an expense ID belonging to User B while logged in as User A) must fail with a `RecordNotFoundError` (HTTP 404). The application will never disclose whether an ID exists for another user.
+Attempting to fetch a document using a URL parameter belonging to another user (e.g., requesting an expense ID belonging to User B while logged in as User A) must fail with a `RecordNotFoundError` (HTTP 404). The application will never disclose whether an ID exists for another user. (Note: Multi-tenant route protection and middleware enforcement are architectural requirements scheduled for implementation in Phase 8, not claims of current verification).
 
 ---
 
@@ -441,7 +445,8 @@ Attempting to fetch a document using a URL parameter belonging to another user (
 
 | IA Risk ID | Description & Potential Impact | Mitigation in Phase 2 Architecture |
 | :--- | :--- | :--- |
-| **IA-RSK-01** | **Conflation of Budget with Actual Outflows:** Users might assume that setting a category allocation deducts real money from their cash pool. | Clearly delineate `/budget` as a forward-looking plan with prominent labels: *"Planned Allocation (Plan)"* vs. `/expenses` as *"Actual Expenditures (Reality)"*. |
+| **IA-RSK-01** | **Conflation of Budget with Actual Outflows:** Users might assume that setting a category allocation deducts real money from their recorded salary or remaining estimate. | Clearly delineate `/budget` as a forward-looking plan with prominent labels: *"Planned Allocation (Plan)"* vs. `/expenses` as *"Actual Expenditures (Reality)"*. Explicitly clarify that envelope allocations are planning caps, not actual spending or savings. |
+| **IA-RSK-06** | **Unresolved Period Attribution Ambiguity:** Calendar-month expense date vs. salary pay period mismatch leading to inconsistent dashboard period views. | Flagged as an architectural blocker for Phase 4/5. Ensure switching periods in header is strictly read-only and does not mutate any underlying financial records. |
 | **IA-RSK-02** | **Omission of ZBB from Navigation:** In the legacy layout, no budget route existed, leading users to believe the app was a simple expense tracker. | Established `/budget` as a primary navigation item directly adjacent to `/salary` in both desktop sidebar and mobile drawer. |
 | **IA-RSK-03** | **Navigation Clutter from Post-MVP Routes:** Presenting non-functional routes (Loans, Insurance, Investments) confuses users during MVP. | Post-MVP items are isolated into a separate "Balance Sheet Commitments" group in the IA and marked with visual "Later" badges until Phase 7. |
 | **IA-RSK-04** | **Pay Period Confusion across Routes:** Navigating from `/dashboard` (October) to `/expenses` might reset the view to all-time, causing cognitive mismatch. | Pay period state (`periodYear`, `periodMonth`) is centralized in the sticky header context and propagated consistently across all ledger views. |
@@ -455,22 +460,30 @@ Attempting to fetch a document using a URL parameter belonging to another user (
 - [x] Comprehensive route inventory with layout groups, parameters, and access levels
 - [x] Navigation hierarchy (Desktop fixed sidebar, sticky header, mobile drawer)
 - [x] Integration of Zero-Based Budgeting (`/budget`) into primary navigation
-- [x] Complete Mermaid user-flow diagrams (Onboarding, Salary & ZBB, Expense logging, Savings goal & deposit, Salary correction, Month-end review)
+- [x] Complete Mermaid user-flow diagrams (Onboarding, Salary & ZBB, Expense logging, Savings goal & contribution, Salary correction, Month-end review)
 - [x] Screen-level Information Architecture & state contracts for all MVP routes
 - [x] Role-Based Access Control (RBAC) and tenant protection matrix
 - [x] Information Architecture risk assessment and mitigations
 
 ---
 
-## 10. Phase 2 Gate Decision
+## 10. Phase 2 Gate Review & Status
 
-### PHASE 2 STATUS: COMPLETE
+### PHASE 2 STATUS: BLOCKED
 
-**Justification:**  
-The Information Architecture, route inventory, navigation hierarchy, user flows, and screen-level state contracts are fully specified and aligned with the approved Phase 1 discovery requirements. No application code, database schemas, or UI implementations were modified during this phase.
+**Audit Summary & Gate Decision:**  
+The Information Architecture, route inventory, navigation hierarchy, user flows, and screen-level state contracts have been audited against Phase 1 requirements and financial definitions.
+
+While structural IA models and route specifications are mature, **Phase 2 Gate is BLOCKED** due to unresolved Phase 1 dependencies and accounting edge cases:
+1. **Unresolved Period Attribution:** Contradiction between calendar-month transaction filtering (`date.getMonth() + 1`) and salary pay-period attribution (`payPeriodMonth`, `payPeriodYear`).
+2. **Missing-Salary Behavior:** Undefined calculation and UX behavior for `Recorded Salary Remaining (Estimate)` when a user inspects a month with zero recorded salary.
+3. **Excess-Outflow Warning Specification:** Lack of a formal business rule in Phase 1 for dashboard presentation when actual expenses + savings exceed recorded salary.
+4. **Investments Scope Conflict:** Discrepancy between Phase 1's Post-MVP classification of Investments and the legacy calculation kernel (`lib/calculations/financial.ts`) which includes `totalInvestments` in `totalAllocated`.
+
+**Invariant Confirmation:** No application code, database schemas, or UI implementations were modified during this documentation audit.
 
 ---
 
 ## 11. Recommended Next Action
 
-Next step: **Phase 3 — Wireframes & UI/UX Design.**
+Do **NOT** advance to Phase 3. Resolve the four specific Phase 1 blocking questions before re-evaluating the Phase 2 gate.
